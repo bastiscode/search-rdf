@@ -1,0 +1,522 @@
+use crate::data::map::OrderedIdMap;
+
+use super::DataSource;
+use anyhow::{Result, anyhow};
+use memmap2::Mmap;
+use pyo3::types::{PyBytes, PyList, PyString};
+use pyo3::{Bound, IntoPyObject, PyAny};
+use safetensors::tensor::TensorView;
+use safetensors::{Dtype, SafeTensors};
+use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
+use std::fs::File;
+use std::mem::size_of;
+use std::path::Path;
+use std::sync::Arc;
+
+const F32_SIZE: usize = size_of::<f32>();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Precision {
+    Float32,
+    UBinary,
+}
+
+impl<'py> IntoPyObject<'py> for Precision {
+    type Target = PyString;
+
+    type Output = Bound<'py, Self::Target>;
+
+    type Error = Infallible;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        let s = match self {
+            Precision::Float32 => "float32",
+            Precision::UBinary => "ubinary",
+        };
+        s.into_pyobject(py)
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Embedding<'a> {
+    F32(&'a [f32]),
+    Binary(&'a [u8]),
+}
+
+impl<'py> IntoPyObject<'py> for Embedding<'py> {
+    type Target = PyAny;
+
+    type Output = Bound<'py, Self::Target>;
+
+    type Error = anyhow::Error;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        let out = match self {
+            Embedding::F32(floats) => PyList::new(py, floats)?.into_any(),
+            Embedding::Binary(bytes) => PyBytes::new(py, bytes).into_any(),
+        };
+        Ok(out)
+    }
+}
+
+#[derive(Debug)]
+pub struct Tensors {
+    // need to keep mmap alive as long as safetensors is used
+    #[allow(dead_code)]
+    mmap: Mmap,
+    #[allow(dead_code)]
+    safetensors: SafeTensors<'static>,
+    embedding: TensorView<'static>,
+    id: Option<TensorView<'static>>,
+    pub model: String,
+    pub precision: Precision,
+}
+
+impl Tensors {
+    pub fn load(path: &Path) -> Result<Self> {
+        let mmap = unsafe { Mmap::map(&File::open(path)?)? };
+        let safetensors = unsafe {
+            std::mem::transmute::<SafeTensors<'_>, SafeTensors<'static>>(SafeTensors::deserialize(
+                &mmap,
+            )?)
+        };
+
+        let embedding = safetensors
+            .tensor("embedding")
+            .map_err(|_| anyhow!("'embedding' tensor not found in safetensors file"))?;
+
+        let embedding_shape = embedding.shape();
+        if embedding_shape.len() != 2 {
+            return Err(anyhow!(
+                "Expected 2D embeddings tensor, got shape {:?}",
+                embedding_shape
+            ));
+        }
+
+        let precision = match embedding.dtype() {
+            Dtype::F32 => Precision::Float32,
+            Dtype::U8 => Precision::UBinary,
+            other => {
+                return Err(anyhow!(
+                    "Unsupported embedding dtype: {:?}. Expected F32 or U8 (for ubinary)",
+                    other
+                ));
+            }
+        };
+
+        let (_, metadata) = SafeTensors::read_metadata(&mmap)?;
+        let Some(metadata) = metadata.metadata() else {
+            return Err(anyhow!("Embedding safetensors missing metadata"));
+        };
+
+        let model = metadata
+            .get("model")
+            .cloned()
+            .ok_or_else(|| anyhow!("Embedding safetensors missing required 'model' metadata"))?;
+
+        let id = safetensors.tensor("id").ok();
+        if let Some(id) = id.as_ref() {
+            let id_shape = id.shape();
+            if id_shape.len() != 1 {
+                return Err(anyhow!("Expected 1D id tensor, got shape {:?}", id_shape));
+            }
+
+            if id_shape[0] != embedding_shape[0] {
+                return Err(anyhow!(
+                    "ID tensor length ({}) does not match embeddings length ({})",
+                    id_shape[0],
+                    embedding_shape[0]
+                ));
+            }
+        };
+
+        Ok(Self {
+            mmap,
+            safetensors,
+            embedding,
+            id,
+            precision,
+            model,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.embedding.shape()[0]
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn num_dimensions(&self) -> usize {
+        match self.precision {
+            Precision::Float32 => self.embedding.shape()[1],
+            Precision::UBinary => self.embedding.shape()[1] * 8,
+        }
+    }
+
+    pub fn get(&self, idx: usize) -> Option<Embedding<'_>> {
+        let data = self.embedding.data();
+
+        match self.precision {
+            Precision::Float32 => {
+                let start = idx * self.num_dimensions() * F32_SIZE;
+                let end = start + self.num_dimensions() * F32_SIZE;
+
+                if end > data.len() {
+                    return None;
+                }
+
+                let slice = &data[start..end];
+                let (head, floats, tail) = unsafe { slice.align_to::<f32>() };
+
+                if !head.is_empty() || !tail.is_empty() || floats.len() != self.num_dimensions() {
+                    return None;
+                }
+
+                Some(Embedding::F32(floats))
+            }
+            Precision::UBinary => {
+                let data = self.embedding.data();
+                let bytes_per_embedding = self.num_dimensions().div_ceil(8);
+                let start = idx * bytes_per_embedding;
+                let end = start + bytes_per_embedding;
+
+                if end > data.len() {
+                    return None;
+                }
+
+                Some(Embedding::Binary(&data[start..end]))
+            }
+        }
+    }
+
+    pub fn ids(&self) -> Option<&[u32]> {
+        let id_tensor = self.id.as_ref()?;
+        let id_data = id_tensor.data();
+        let (head, ids_slice, tail) = unsafe { id_data.align_to::<u32>() };
+        if !head.is_empty() || !tail.is_empty() || ids_slice.len() != self.len() {
+            return None;
+        }
+        Some(ids_slice)
+    }
+}
+
+#[derive(Debug)]
+struct Inner {
+    tensors: Tensors,
+    id_map: OrderedIdMap,
+}
+
+#[derive(Clone, Debug)]
+pub struct Embeddings {
+    inner: Arc<Inner>,
+}
+
+impl Embeddings {
+    pub fn build(data_dir: &Path) -> Result<()> {
+        let embeddings_file = data_dir.join("embedding.safetensors");
+        let tensors = Tensors::load(&embeddings_file)?;
+
+        // Build ID map from 'id' tensor
+        let Some(ids) = tensors.ids() else {
+            return Err(anyhow!("embeddings file missing 'id' tensor"));
+        };
+
+        let id_map_file = data_dir.join("id-map.bin");
+        let id_map = OrderedIdMap::from_ids(ids)?;
+        id_map.save(&id_map_file)?;
+
+        Ok(())
+    }
+
+    /// Load Embeddings from directory
+    pub fn load(data_dir: &Path) -> Result<Self> {
+        let embeddings_file = data_dir.join("embedding.safetensors");
+        let tensors = Tensors::load(&embeddings_file)?;
+
+        if tensors.ids().is_none() {
+            return Err(anyhow!("embeddings file missing 'id' tensor"));
+        }
+
+        let id_map_file = data_dir.join("id-map.bin");
+        let id_map = OrderedIdMap::load(&id_map_file)?;
+
+        Ok(Self {
+            inner: Arc::new(Inner { tensors, id_map }),
+        })
+    }
+
+    /// Get the precision of the embeddings
+    pub fn precision(&self) -> Precision {
+        self.inner.tensors.precision
+    }
+
+    /// Get the number of dimensions
+    pub fn num_dimensions(&self) -> usize {
+        self.inner.tensors.num_dimensions()
+    }
+
+    /// Get the model name from metadata
+    pub fn model(&self) -> &str {
+        &self.inner.tensors.model
+    }
+}
+
+impl DataSource for Embeddings {
+    type Field<'a> = Embedding<'a>;
+
+    fn len(&self) -> usize {
+        self.inner.id_map.len()
+    }
+
+    fn num_fields(&self, id: u32) -> Option<usize> {
+        self.inner.id_map.count(id).map(|c| c as usize)
+    }
+
+    fn field(&self, id: u32, field: usize) -> Option<Self::Field<'_>> {
+        let range = self.inner.id_map.range(id)?;
+        if field >= range.end {
+            return None;
+        }
+        let tensor_idx = range.start + field;
+        self.inner.tensors.get(tensor_idx)
+    }
+
+    fn fields(&self, id: u32) -> Option<impl Iterator<Item = Self::Field<'_>>> {
+        let range = self.inner.id_map.range(id)?;
+        Some(
+            range
+                .into_iter()
+                .filter_map(|idx| self.inner.tensors.get(idx)),
+        )
+    }
+
+    fn data_type(&self) -> &'static str {
+        "Embeddings"
+    }
+
+    fn total_fields(&self) -> usize {
+        self.inner.id_map.total_count as usize
+    }
+
+    fn items(&self) -> impl Iterator<Item = (u32, Vec<Self::Field<'_>>)> + '_ {
+        self.inner.id_map.ids().iter().filter_map(|&id| {
+            let embeddings = self.fields(id)?.collect();
+            Some((id, embeddings))
+        })
+    }
+
+    fn max_fields(&self) -> usize {
+        self.inner.id_map.max_count as usize
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    fn create_test_safetensors(
+        path: &Path,
+        embeddings: Vec<Vec<f32>>,
+        ids: Vec<u32>,
+    ) -> Result<()> {
+        use safetensors::serialize;
+        use safetensors::tensor::{Dtype, TensorView};
+
+        assert_eq!(embeddings.len(), ids.len());
+
+        let num_embeddings = embeddings.len();
+        let num_dimensions = embeddings[0].len();
+
+        // Flatten embeddings into single vector
+        let embedding_data: Vec<f32> = embeddings.into_iter().flatten().collect();
+        let embedding_bytes: Vec<u8> = embedding_data
+            .iter()
+            .flat_map(|f| f.to_le_bytes())
+            .collect();
+
+        // Convert IDs to bytes
+        let id_bytes: Vec<u8> = ids.iter().flat_map(|id| id.to_le_bytes()).collect();
+
+        // Create tensors
+        let embedding_tensor = TensorView::new(
+            Dtype::F32,
+            vec![num_embeddings, num_dimensions],
+            &embedding_bytes,
+        )?;
+        let id_tensor = TensorView::new(Dtype::U32, vec![num_embeddings], &id_bytes)?;
+
+        // Serialize with model metadata
+        let tensors = vec![("embedding", embedding_tensor), ("id", id_tensor)];
+        let bytes = serialize(
+            tensors,
+            Some(HashMap::from([(
+                String::from("model"),
+                String::from("test-model"),
+            )])),
+        )?;
+
+        // Write to file
+        std::fs::write(path, bytes)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_embeddings_load() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let data_dir = temp_dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).expect("Failed to create data dir");
+
+        let embeddings_file = data_dir.join("embedding.safetensors");
+
+        // Create test embeddings with sorted IDs (required for OrderedIdMap)
+        let embeddings = vec![
+            vec![0.1, 0.2, 0.3, 0.4],
+            vec![0.5, 0.6, 0.7, 0.8],
+            vec![0.9, 1.0, 1.1, 1.2],
+        ];
+        let ids = vec![100, 200, 300]; // Must be sorted for OrderedIdMap
+
+        create_test_safetensors(&embeddings_file, embeddings.clone(), ids.clone())
+            .expect("Failed to create safetensors");
+
+        // Build and load
+        Embeddings::build(&data_dir).expect("Failed to build");
+        let data = Embeddings::load(&data_dir).expect("Failed to load");
+
+        // Test basic properties
+        assert_eq!(data.len(), 3);
+        assert_eq!(data.num_dimensions(), 4);
+        assert_eq!(data.precision(), Precision::Float32);
+        assert_eq!(data.model(), "test-model");
+
+        // Test DataSource trait - field(id, field_idx) returns embeddings for that ID
+        assert_eq!(data.num_fields(100), Some(1));
+        assert_eq!(data.num_fields(200), Some(1));
+        assert_eq!(data.num_fields(300), Some(1));
+        assert_eq!(data.num_fields(999), None);
+
+        // Test field access - returns the embedding at field_idx for the given id
+        if let Some(Embedding::F32(embedding)) = data.field(100, 0) {
+            assert_eq!(embedding.len(), 4);
+            assert!((embedding[0] - 0.1).abs() < 1e-6);
+            assert!((embedding[1] - 0.2).abs() < 1e-6);
+        } else {
+            panic!("Expected F32 embedding for id 100");
+        }
+
+        if let Some(Embedding::F32(embedding)) = data.field(200, 0) {
+            assert_eq!(embedding.len(), 4);
+            assert!((embedding[0] - 0.5).abs() < 1e-6);
+            assert!((embedding[1] - 0.6).abs() < 1e-6);
+        } else {
+            panic!("Expected F32 embedding for id 200");
+        }
+
+        if let Some(Embedding::F32(embedding)) = data.field(300, 0) {
+            assert_eq!(embedding.len(), 4);
+            assert!((embedding[0] - 0.9).abs() < 1e-6);
+            assert!((embedding[1] - 1.0).abs() < 1e-6);
+        } else {
+            panic!("Expected F32 embedding for id 300");
+        }
+    }
+
+    #[test]
+    fn test_embeddings_validation_missing_metadata() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let data_dir = temp_dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).expect("Failed to create data dir");
+
+        let embeddings_file = data_dir.join("embedding.safetensors");
+
+        use safetensors::serialize;
+        use safetensors::tensor::{Dtype, TensorView};
+
+        let embeddings = vec![vec![1.0, 2.0]];
+        let ids = vec![1u32];
+
+        let embedding_data: Vec<f32> = embeddings.into_iter().flatten().collect();
+        let embedding_bytes: Vec<u8> = embedding_data
+            .iter()
+            .flat_map(|f| f.to_le_bytes())
+            .collect();
+        let id_bytes: Vec<u8> = ids.iter().flat_map(|id| id.to_le_bytes()).collect();
+
+        let embedding_tensor = TensorView::new(Dtype::F32, vec![1, 2], &embedding_bytes).unwrap();
+        let id_tensor = TensorView::new(Dtype::U32, vec![1], &id_bytes).unwrap();
+
+        // missing metadata
+        let tensors = vec![("embedding", embedding_tensor), ("id", id_tensor)];
+        let bytes = serialize(tensors.clone(), None).unwrap(); // No metadata!
+        std::fs::write(&embeddings_file, bytes).unwrap();
+
+        let result = Embeddings::build(&data_dir);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("missing metadata"));
+
+        // missing 'model' key
+        let bytes = serialize(tensors, Some(HashMap::new())).unwrap(); // No metadata!
+        std::fs::write(&embeddings_file, bytes).unwrap();
+
+        let result = Embeddings::build(&data_dir);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("missing required 'model' metadata")
+        );
+    }
+
+    #[test]
+    fn test_embeddings_validation_mismatched_lengths() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let data_dir = temp_dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).expect("Failed to create data dir");
+
+        let embeddings_file = data_dir.join("embedding.safetensors");
+
+        use safetensors::serialize;
+        use safetensors::tensor::{Dtype, TensorView};
+
+        let embeddings = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
+        let ids = vec![1u32, 2, 3]; // Wrong length!
+
+        let embedding_data: Vec<f32> = embeddings.into_iter().flatten().collect();
+        let embedding_bytes: Vec<u8> = embedding_data
+            .iter()
+            .flat_map(|f| f.to_le_bytes())
+            .collect();
+        let id_bytes: Vec<u8> = ids.iter().flat_map(|id| id.to_le_bytes()).collect();
+
+        let embedding_tensor = TensorView::new(Dtype::F32, vec![2, 2], &embedding_bytes).unwrap();
+        let id_tensor = TensorView::new(Dtype::U32, vec![3], &id_bytes).unwrap();
+
+        let tensors = vec![("embedding", embedding_tensor), ("id", id_tensor)];
+        let bytes = serialize(
+            tensors,
+            Some(HashMap::from([(
+                String::from("model"),
+                String::from("test"),
+            )])),
+        )
+        .unwrap();
+        std::fs::write(&embeddings_file, bytes).unwrap();
+
+        let result = Embeddings::build(&data_dir);
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("ID tensor length (3) does not match embeddings length (2)")
+        );
+    }
+}

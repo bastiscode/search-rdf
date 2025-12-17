@@ -1,0 +1,90 @@
+"""Text embedding using sentence-transformers."""
+
+import numpy as np
+from sentence_transformers import SentenceTransformer
+from tqdm import trange
+
+
+class TextEmbeddingModel:
+    """Text embedding model using sentence-transformers.
+
+    Args:
+        model: Name or path of the sentence-transformer model
+        device: Device to use for inference ('cuda', 'cpu', or None for auto-detection)
+    """
+
+    def __init__(self, model: str, device: str | None = None):
+        self.model = model
+        self.encoder = SentenceTransformer(model, device=device)
+        self.dim: int = self.encoder.get_sentence_embedding_dimension()  # type: ignore
+        assert self.dim is not None, "unable to get embedding dimension"
+
+    def embed(
+        self,
+        texts: list[str],
+        precision: str = "float32",
+        embedding_dim: int | None = None,
+        batch_size: int | None = None,
+        show_progress: bool = False,
+    ) -> np.ndarray:
+        """Embed a list of texts.
+
+        Args:
+            texts: List of texts to embed
+            precision: Either 'float32' or 'ubinary'
+            embedding_dim: Target embedding dimension (must be <= model dimension)
+            batch_size: Batch size for encoding (default: all texts in one batch)
+            show_progress: Whether to show progress bar
+
+        Returns:
+            NumPy array of embeddings with shape (len(texts), embedding_dim)
+        """
+        assert precision in ["float32", "ubinary"], f"invalid precision {precision}"
+
+        if embedding_dim and embedding_dim < self.dim:
+            dim = embedding_dim
+        else:
+            dim = self.dim
+
+        if precision == "ubinary":
+            assert dim % 8 == 0, (
+                "embedding dimension must be a multiple of 8 for binary"
+            )
+            dim = dim // 8
+
+        if not texts:
+            return np.empty((0, dim))
+
+        if batch_size is None:
+            batch_size = len(texts)
+
+        # Sort texts by length to minimize padding
+        indices = np.argsort([-len(text) for text in texts])
+        sorted_texts = [texts[i] for i in indices]
+        full_embeddings = []
+
+        # Process in batches to avoid OOM for large datasets
+        for i in trange(
+            0,
+            len(sorted_texts),
+            batch_size,
+            desc="Calculating embeddings",
+            disable=not show_progress,
+        ):
+            batch = sorted_texts[i : i + batch_size]
+            embeddings = self.encoder.encode(  # type: ignore
+                batch,
+                normalize_embeddings=True,
+                batch_size=len(batch),
+                precision=precision,  # type: ignore
+                show_progress_bar=False,
+            )[:, :dim]
+            full_embeddings.extend(embeddings)
+
+        embeddings = np.vstack(full_embeddings)
+        inv_indices = np.argsort(indices)
+
+        # Verify that inv_indices correctly restores the original order
+        assert all(t == sorted_texts[i] for t, i in zip(texts, inv_indices))
+
+        return embeddings[inv_indices]
