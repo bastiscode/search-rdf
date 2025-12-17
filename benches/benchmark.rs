@@ -6,12 +6,12 @@ use std::{
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
-use search_index::{
-    data::{DataSource, TextData},
-    index::{
-        SearchIndex, SearchParams,
-        keyword::KeywordIndex,
+use search_rdf::{
+    data::{
+        DataSource, TextData,
+        map::{OrderedDataMap, TrieMap},
     },
+    index::{SearchIndex, SearchParams, keyword::KeywordIndex},
 };
 
 fn convert_tsv_to_binary(tsv_file: &Path, data_dir: &Path) -> std::io::Result<()> {
@@ -79,6 +79,22 @@ fn bench_data(c: &mut Criterion) {
         })
     });
 
+    // Benchmark load of OrderedDataMap
+    g.bench_function("load_data_map", |b| {
+        b.iter(|| {
+            let _ = OrderedDataMap::load(&data_dir.join("data-map.bin"))
+                .expect("Failed to load data map");
+        })
+    });
+
+    // Benchmark load of TrieMap
+    g.bench_function("load_trie_map", |b| {
+        b.iter(|| {
+            let _ = TrieMap::load(&data_dir.join("identifier-map.bin"))
+                .expect("Failed to load trie map");
+        })
+    });
+
     g.bench_function("field", |b| {
         let id = (data.len() / 2) as u32;
         b.iter(|| {
@@ -111,7 +127,6 @@ fn bench_data(c: &mut Criterion) {
 
     g.finish();
 }
-
 
 fn bench_keyword_index(c: &mut Criterion) {
     let dir = env!("CARGO_MANIFEST_DIR");
@@ -152,10 +167,7 @@ fn bench_keyword_index(c: &mut Criterion) {
                     |b| {
                         b.iter(|| {
                             let _ = index
-                                .search(
-                                    query,
-                                    SearchParams::default().k(k).exact(exact),
-                                )
+                                .search(query, SearchParams::default().k(k).exact(exact))
                                 .expect("Failed to find matches");
                         })
                     },
