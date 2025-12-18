@@ -1,13 +1,13 @@
 [project]
-name = "search-index"
-description = "Search indices backed by Rust"
+name = "search-rdf"
+description = "Search indices (mainly to be combined with RDF query engines) backed by Rust"
 version = "0.1.0"
 authors = [{ name = "Sebastian Walter", email = "swalter@cs.uni-freiburg.de" }]
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 
-keywords = ["utilities", "index", "prefix", "similarity", "search"]
+keywords = ["utilities", "index", "rdf", "keyword", "similarity", "search"]
 
 classifiers = [
   "Programming Language :: Rust",
@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.urls]
-Github = "https://github.com/bastiscode/search-index"
+Github = "https://github.com/bastiscode/search-rdf"
 
 [build-system]
 requires = ["maturin>=1"]
@@ -33,4 +33,4 @@ build-backend = "maturin"
 
 [tool.maturin]
 python-source = "python"
-module-name = "search_index._internal"
+module-name = "search_rdf._internal"

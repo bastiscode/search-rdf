@@ -7,13 +7,12 @@ class TextData:
     """Text data source backed by a TSV file."""
 
     @staticmethod
-    def build(tsv_file: str, data_dir: str) -> None:
+    def build(data_dir: str) -> None:
         """
-        Build text data from a TSV file.
+        Build text data from a data directory.
 
         Args:
-            tsv_file: Path to input TSV file (first column is identifier)
-            data_dir: Output directory for the text data
+            data_dir: Directory containing the text data files
         """
         ...
 
@@ -44,24 +43,13 @@ class TextEmbeddings:
     """Text embeddings with associated text data."""
 
     @staticmethod
-    def build(tsv_file: str, embeddings_file: str, data_dir: str) -> None:
-        """
-        Build text embeddings from a TSV file and embeddings file.
-
-        Args:
-            tsv_file: Path to input TSV file (first column is identifier)
-            embeddings_file: Path to embeddings file (safetensors format)
-            data_dir: Output directory for the text embeddings data
-        """
-        ...
-
-    @staticmethod
-    def load(data_dir: str) -> TextEmbeddings:
+    def load(data: TextData, embeddings_file: str) -> TextEmbeddings:
         """
         Load text embeddings from a directory.
 
         Args:
-            data_dir: Directory containing the text embeddings data
+            data: Text data associated with the embeddings
+            embeddings_file: File containing the embeddings
 
         Returns:
             Loaded TextEmbeddings instance
@@ -73,30 +61,7 @@ class TextEmbeddings:
     def num_dimensions(self) -> int: ...
     def precision(self) -> str: ...
     def model(self) -> str: ...
-    def fields_per_data_point(self, data_id: int) -> int | None: ...
-    def identifier(self, id: int) -> str | None: ...
     def id_from_identifier(self, identifier: str) -> int | None: ...
-    def text_data(self) -> TextData:
-        """
-        Get the underlying text data.
-
-        Returns:
-            TextData instance
-        """
-        ...
-
-    def get_embedding(self, field_id: int) -> list[float] | bytes | None:
-        """
-        Get an embedding by field ID.
-
-        Args:
-            field_id: Field ID
-
-        Returns:
-            Embedding as list of floats (for float32) or bytes (for binary),
-            or None if not found
-        """
-        ...
 
 @final
 class KeywordIndex:
@@ -148,9 +113,6 @@ class KeywordIndex:
         """
         ...
 
-    def __len__(self) -> int: ...
-    def is_empty(self) -> bool: ...
-
 @final
 class TextEmbeddingIndex:
     """Embedding-based search index for text data."""
@@ -181,7 +143,7 @@ class TextEmbeddingIndex:
         """
         ...
 
-    def search_embedding(
+    def search(
         self,
         embedding: list[float] | bytes,
         k: int = 100,
@@ -201,9 +163,6 @@ class TextEmbeddingIndex:
             List of (document_id, field_index, score) tuples
         """
         ...
-
-    def __len__(self) -> int: ...
-    def is_empty(self) -> bool: ...
 
 __all__ = [
     "KeywordIndex",

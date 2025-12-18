@@ -167,7 +167,7 @@ fn bench_keyword_index(c: &mut Criterion) {
                     |b| {
                         b.iter(|| {
                             let _ = index
-                                .search(query, SearchParams::default().k(k).exact(exact))
+                                .search(query, SearchParams::default().with_k(k).with_exact(exact))
                                 .expect("Failed to find matches");
                         })
                     },
@@ -178,9 +178,10 @@ fn bench_keyword_index(c: &mut Criterion) {
                     |b| {
                         b.iter(|| {
                             let _ = index
-                                .search(
+                                .search_with_filter(
                                     query,
-                                    SearchParams::default().k(k).exact(exact).filter(filter),
+                                    SearchParams::default().with_k(k).with_exact(exact),
+                                    filter,
                                 )
                                 .expect("Failed to find matches");
                         })

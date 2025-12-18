@@ -12,7 +12,7 @@ use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::Arc;
-use usearch::ffi::{IndexOptions, ScalarKind};
+use usearch::ffi::IndexOptions;
 use usearch::{Index, b1x8};
 
 struct Inner {
@@ -54,7 +54,8 @@ impl TextEmbeddingIndex {
     fn search_internal<F>(
         &self,
         embedding: &Embedding<'_>,
-        params: SearchParams<F>,
+        params: SearchParams,
+        filter: Option<F>,
     ) -> Result<Vec<Match>>
     where
         F: Fn(u32) -> bool,
@@ -65,7 +66,7 @@ impl TextEmbeddingIndex {
         let num_dimensions = data.num_dimensions();
         let search_k = params.search_k(data);
 
-        let predicate = params.filter.map(|f| self.filter_internal(f));
+        let predicate = filter.map(|f| self.filter_internal(f));
 
         // Validate embedding matches index precision and dimensions
         let results = match (data.precision(), embedding) {
@@ -131,6 +132,7 @@ impl TextEmbeddingIndex {
                 let score = self
                     .inner
                     .metadata
+                    .params
                     .metric
                     .to_score(distance, num_dimensions);
 
@@ -189,15 +191,10 @@ impl SearchIndex for TextEmbeddingIndex {
         let num_dimensions = data.num_dimensions();
         let precision = data.precision();
 
-        let scalar_kind = match precision {
-            Precision::Float32 => ScalarKind::F32,
-            Precision::UBinary => ScalarKind::B1,
-        };
-
         let options = IndexOptions {
             dimensions: num_dimensions,
             metric: params.metric.to_usearch_metric(),
-            quantization: scalar_kind,
+            quantization: precision.to_usearch_scalar_kind(),
             connectivity: params.connectivity,
             expansion_add: params.expansion_add,
             expansion_search: params.expansion_search,
@@ -235,7 +232,7 @@ impl SearchIndex for TextEmbeddingIndex {
 
         // Save metadata as JSON
         let metadata = Metadata {
-            metric: params.metric,
+            params,
             precision,
             dimensions: num_dimensions,
         };
@@ -261,15 +258,12 @@ impl SearchIndex for TextEmbeddingIndex {
         let index_file = index_dir.join("index.usearch");
 
         let index = Index::new(&IndexOptions {
-            dimensions: data.num_dimensions(),
-            metric: metadata.metric.to_usearch_metric(),
-            quantization: match metadata.precision {
-                Precision::Float32 => ScalarKind::F32,
-                Precision::UBinary => ScalarKind::B1,
-            },
-            connectivity: 16,
-            expansion_add: 128,
-            expansion_search: 64,
+            dimensions: metadata.dimensions,
+            metric: metadata.params.metric.to_usearch_metric(),
+            quantization: metadata.precision.to_usearch_scalar_kind(),
+            connectivity: metadata.params.connectivity,
+            expansion_add: metadata.params.expansion_add,
+            expansion_search: metadata.params.expansion_search,
             multi: false,
         })?;
 
@@ -295,12 +289,26 @@ impl SearchIndex for TextEmbeddingIndex {
         "TextEmbeddingIndex"
     }
 
-    fn search<'q, F>(&self, query: &Self::Query<'q>, params: SearchParams<F>) -> Result<Vec<Match>>
+    fn search(&self, query: &Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>> {
+        match query {
+            Query::Embedding(embedding) => {
+                self.search_internal(embedding, params, None::<fn(u32) -> bool>)
+            }
+            Query::String(_) => Err(anyhow!("String queries are not supported yet")),
+        }
+    }
+
+    fn search_with_filter<F>(
+        &self,
+        query: &Self::Query<'_>,
+        params: SearchParams,
+        filter: F,
+    ) -> Result<Vec<Match>>
     where
         F: Fn(u32) -> bool,
     {
         match query {
-            Query::Embedding(embedding) => self.search_internal(embedding, params),
+            Query::Embedding(embedding) => self.search_internal(embedding, params, Some(filter)),
             Query::String(_) => Err(anyhow!("String queries are not supported yet")),
         }
     }
@@ -310,46 +318,12 @@ impl SearchIndex for TextEmbeddingIndex {
 mod tests {
     use super::*;
     use crate::data::text::{TextData, embedding::TextEmbeddings};
+    use crate::data::text::utils::TextItem;
     use crate::index::EmbeddingParams;
     use crate::index::embedding::Metric;
     use std::collections::HashMap;
-    use std::fs::{File, create_dir_all};
-    use std::io::{BufWriter, Write};
+    use std::fs::create_dir_all;
     use tempfile::tempdir;
-
-    // Helper to create a data file in the expected format
-    fn create_test_data_file(data_dir: &Path, rows: &[(&str, &str)]) -> Result<()> {
-        std::fs::create_dir_all(data_dir)?;
-        let data_file = data_dir.join("data");
-        let mut file = BufWriter::new(File::create(&data_file)?);
-
-        for (identifier, tsv_row) in rows {
-            // Split tab-separated fields
-            let fields: Vec<_> = tsv_row.split('\t').collect();
-
-            // Write identifier length (u16)
-            let key_bytes = identifier.as_bytes();
-            file.write_all(&(key_bytes.len() as u16).to_le_bytes())?;
-
-            // Write identifier
-            file.write_all(key_bytes)?;
-
-            // Write number of fields (u16)
-            file.write_all(&(fields.len() as u16).to_le_bytes())?;
-
-            // Write each field
-            for field in fields {
-                // Write field length (u32)
-                let value_bytes = field.as_bytes();
-                file.write_all(&(value_bytes.len() as u32).to_le_bytes())?;
-
-                // Write field value
-                file.write_all(value_bytes)?;
-            }
-        }
-
-        Ok(())
-    }
 
     fn create_test_safetensors(path: &Path, embeddings: Vec<Vec<f32>>) -> Result<()> {
         use safetensors::serialize;
@@ -400,16 +374,18 @@ mod tests {
         create_dir_all(&index_dir).expect("Failed to create index dir");
 
         // Create test data (3 rows, 2 fields each = 6 total fields)
-        let rows = vec![
-            ("Q1", "Cat\tFeline"),
-            ("Q2", "Dog\tCanine"),
-            ("Q3", "Bird\tAvian"),
+        let items = vec![
+            Ok(TextItem::new("Q1".to_string(), vec!["Cat".to_string(), "Feline".to_string()])
+                .expect("Failed to create TextItem")),
+            Ok(TextItem::new("Q2".to_string(), vec!["Dog".to_string(), "Canine".to_string()])
+                .expect("Failed to create TextItem")),
+            Ok(TextItem::new("Q3".to_string(), vec!["Bird".to_string(), "Avian".to_string()])
+                .expect("Failed to create TextItem")),
         ];
 
-        create_test_data_file(&data_dir, &rows).expect("Failed to create test data");
-
         // Build TextData
-        TextData::build(&data_dir).expect("Failed to build TextData");
+        TextData::build(items, &data_dir).expect("Failed to build TextData");
+        let data = TextData::load(&data_dir).expect("Failed to load TextData");
 
         // Create normalized test embeddings (6 embeddings, 4 dimensions each)
         let mut embeddings = vec![
@@ -431,7 +407,7 @@ mod tests {
             .expect("Failed to create safetensors");
 
         // Load data
-        let data = TextEmbeddings::load(&data_dir).expect("Failed to load data");
+        let data = TextEmbeddings::load(data, &embeddings_file).expect("Failed to load data");
 
         let params = EmbeddingParams::from_precision(data.precision());
 
@@ -470,9 +446,10 @@ mod tests {
 
         // Test search with filter - exclude Q1
         let results_filtered = index
-            .search(
+            .search_with_filter(
                 &Query::Embedding(Embedding::F32(&query)),
-                SearchParams::default().filter(|id| id != 0),
+                SearchParams::default(),
+                |id| id != 0,
             )
             .expect("Failed to search with filter");
 
@@ -494,12 +471,16 @@ mod tests {
         create_dir_all(&index_dir).expect("Failed to create index dir");
 
         // Create test data
-        let rows = vec![("Q1", "Item1"), ("Q2", "Item2")];
-
-        create_test_data_file(&data_dir, &rows).expect("Failed to create test data");
+        let items = vec![
+            Ok(TextItem::new("Q1".to_string(), vec!["Item1".to_string()])
+                .expect("Failed to create TextItem")),
+            Ok(TextItem::new("Q2".to_string(), vec!["Item2".to_string()])
+                .expect("Failed to create TextItem")),
+        ];
 
         // Build TextData
-        TextData::build(&data_dir).expect("Failed to build TextData");
+        TextData::build(items, &data_dir).expect("Failed to build TextData");
+        let data = TextData::load(&data_dir).expect("Failed to load TextData");
 
         // Create test embeddings (not normalized)
         let embeddings = vec![
@@ -512,7 +493,7 @@ mod tests {
             .expect("Failed to create safetensors");
 
         // Load data and build index
-        let data = TextEmbeddings::load(&data_dir).expect("Failed to load data");
+        let data = TextEmbeddings::load(data, &embeddings_file).expect("Failed to load data");
 
         let params = EmbeddingParams::default().with_metric(Metric::InnerProduct);
 
@@ -547,16 +528,21 @@ mod tests {
         // Create test data with varying number of fields
         // Q1: 1 field, Q2: 3 fields, Q3: 2 fields
         // Max should be 3
-        let rows = vec![
-            ("Q1", "A"),       // 1 field
-            ("Q2", "B\tC\tD"), // 3 fields
-            ("Q3", "E\tF"),    // 2 fields
+        let items = vec![
+            Ok(TextItem::new("Q1".to_string(), vec!["A".to_string()])
+                .expect("Failed to create TextItem")),
+            Ok(TextItem::new(
+                "Q2".to_string(),
+                vec!["B".to_string(), "C".to_string(), "D".to_string()],
+            )
+            .expect("Failed to create TextItem")),
+            Ok(TextItem::new("Q3".to_string(), vec!["E".to_string(), "F".to_string()])
+                .expect("Failed to create TextItem")),
         ];
 
-        create_test_data_file(&data_dir, &rows).expect("Failed to create test data");
-
         // Build TextData
-        TextData::build(&data_dir).expect("Failed to build TextData");
+        TextData::build(items, &data_dir).expect("Failed to build TextData");
+        let data = TextData::load(&data_dir).expect("Failed to load TextData");
 
         // Create normalized embeddings (6 total: 1 + 3 + 2)
         let mut embeddings = vec![
@@ -577,7 +563,7 @@ mod tests {
             .expect("Failed to create safetensors");
 
         // Load data and build index
-        let data = TextEmbeddings::load(&data_dir).expect("Failed to load data");
+        let data = TextEmbeddings::load(data, &embeddings_file).expect("Failed to load data");
 
         let params = EmbeddingParams::from_precision(data.precision());
 

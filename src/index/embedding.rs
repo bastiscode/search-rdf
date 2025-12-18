@@ -15,8 +15,8 @@ use std::fs::{File, create_dir_all};
 use std::io::BufWriter;
 use std::path::Path;
 use std::sync::Arc;
+use usearch::ffi::IndexOptions;
 use usearch::ffi::MetricKind;
-use usearch::ffi::{IndexOptions, ScalarKind};
 use usearch::{Index, b1x8};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,12 +83,12 @@ impl Metric {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Metadata {
-    pub metric: Metric,
+    pub params: EmbeddingParams,
     pub precision: Precision,
     pub dimensions: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingParams {
     /// Metric to use for similarity search
     pub metric: Metric,
@@ -102,9 +102,7 @@ impl EmbeddingParams {
     pub fn from_precision(precision: Precision) -> Self {
         Self {
             metric: Metric::default_for_precision(precision),
-            connectivity: 16,
-            expansion_add: 128,
-            expansion_search: 64,
+            ..Default::default()
         }
     }
 
@@ -153,7 +151,8 @@ impl EmbeddingIndex {
     fn search_internal<'e, F>(
         &self,
         embedding: Embedding<'e>,
-        params: SearchParams<F>,
+        params: SearchParams,
+        filter: Option<F>,
     ) -> Result<Vec<Match>>
     where
         F: Fn(u32) -> bool,
@@ -163,7 +162,7 @@ impl EmbeddingIndex {
 
         let search_k = params.search_k(data);
 
-        let predicate = params.filter.map(|f| move |id| f(id as u32));
+        let predicate = filter.map(|f| move |id| f(id as u32));
 
         // Validate embedding matches index precision and dimensions
         let results = match (self.inner.data.precision(), embedding) {
@@ -272,15 +271,10 @@ impl SearchIndex for EmbeddingIndex {
         let dimensions = data.num_dimensions();
         let precision = data.precision();
 
-        let scalar_kind = match precision {
-            Precision::Float32 => ScalarKind::F32,
-            Precision::UBinary => ScalarKind::B1,
-        };
-
         let options = IndexOptions {
             dimensions,
             metric: params.metric.to_usearch_metric(),
-            quantization: scalar_kind,
+            quantization: precision.to_usearch_scalar_kind(),
             connectivity: params.connectivity,
             expansion_add: params.expansion_add,
             expansion_search: params.expansion_search,
@@ -312,7 +306,7 @@ impl SearchIndex for EmbeddingIndex {
 
         // Save metadata as JSON
         let metadata = Metadata {
-            metric: params.metric,
+            params,
             precision,
             dimensions,
         };
@@ -339,18 +333,17 @@ impl SearchIndex for EmbeddingIndex {
 
         // Load the index
         let index_file = index_dir.join("index.usearch");
-        let index = Index::new(&IndexOptions {
-            dimensions: data.num_dimensions(),
-            metric: metadata.metric.to_usearch_metric(),
-            quantization: match metadata.precision {
-                Precision::Float32 => ScalarKind::F32,
-                Precision::UBinary => ScalarKind::B1,
-            },
+
+        let options = IndexOptions {
+            dimensions: metadata.dimensions,
+            metric: metadata.params.metric.to_usearch_metric(),
+            quantization: metadata.precision.to_usearch_scalar_kind(),
             connectivity: 16,
             expansion_add: 128,
             expansion_search: 64,
             multi: true, // Enable multi-index to support duplicate IDs
-        })?;
+        };
+        let index = Index::new(&options)?;
 
         index.view(index_file.to_str().ok_or_else(|| anyhow!("Invalid path"))?)?;
 
@@ -367,11 +360,20 @@ impl SearchIndex for EmbeddingIndex {
         "EmbeddingIndex"
     }
 
-    fn search<'q, F>(&self, query: &Self::Query<'q>, params: SearchParams<F>) -> Result<Vec<Match>>
+    fn search(&self, query: &Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>> {
+        self.search_internal(*query, params, None::<fn(u32) -> bool>)
+    }
+
+    fn search_with_filter<F>(
+        &self,
+        query: &Self::Query<'_>,
+        params: SearchParams,
+        filter: F,
+    ) -> Result<Vec<Match>>
     where
         F: Fn(u32) -> bool,
     {
-        self.search_internal(*query, params)
+        self.search_internal(*query, params, Some(filter))
     }
 }
 
@@ -494,10 +496,7 @@ mod embedding_index_tests {
 
         // Test search with filter - exclude ID 100
         let results_filtered = index
-            .search(
-                &Embedding::F32(&query),
-                SearchParams::default().filter(|id| id != 100),
-            )
+            .search_with_filter(&Embedding::F32(&query), SearchParams::default(), |id| id != 100)
             .expect("Failed to search with filter");
 
         // Should find ID 200 or 300, but not 100

@@ -16,11 +16,8 @@ pub struct TextEmbeddings {
 }
 
 impl TextEmbeddings {
-    pub fn load(data_dir: &Path) -> Result<Self> {
-        let data = TextData::load(data_dir)?;
-
-        let embeddings_file = data_dir.join("embedding.safetensors");
-        let tensors = Tensors::load(&embeddings_file)?;
+    pub fn load(data: TextData, embeddings_file: &Path) -> Result<Self> {
+        let tensors = Tensors::load(embeddings_file)?;
 
         if data.total_fields() != tensors.len() {
             return Err(anyhow!(
@@ -110,44 +107,9 @@ impl DataSource for TextEmbeddings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::text::utils::TextItem;
     use std::collections::HashMap;
-    use std::fs::File;
-    use std::io::{BufWriter, Write};
     use tempfile::tempdir;
-
-    // Helper to create a data file in the expected format
-    fn create_test_data_file(data_dir: &Path, rows: &[(&str, &str)]) -> Result<()> {
-        std::fs::create_dir_all(data_dir)?;
-        let data_file = data_dir.join("data");
-        let mut file = BufWriter::new(File::create(&data_file)?);
-
-        for (identifier, tsv_row) in rows {
-            // Split tab-separated fields
-            let fields: Vec<_> = tsv_row.split('\t').collect();
-
-            // Write identifier length (u16)
-            let key_bytes = identifier.as_bytes();
-            file.write_all(&(key_bytes.len() as u16).to_le_bytes())?;
-
-            // Write identifier
-            file.write_all(key_bytes)?;
-
-            // Write number of fields (u16)
-            file.write_all(&(fields.len() as u16).to_le_bytes())?;
-
-            // Write each field
-            for field in fields {
-                // Write field length (u32)
-                let value_bytes = field.as_bytes();
-                file.write_all(&(value_bytes.len() as u32).to_le_bytes())?;
-
-                // Write field value
-                file.write_all(value_bytes)?;
-            }
-        }
-
-        Ok(())
-    }
 
     fn create_test_safetensors(path: &Path, embeddings: Vec<Vec<f32>>) -> Result<()> {
         use safetensors::serialize;
@@ -188,16 +150,27 @@ mod tests {
         let data_dir = temp_dir.path().join("data");
 
         // Create test data (3 rows, 2 fields each = 6 total fields)
-        let rows = vec![
-            ("Q1", "Universe\tCosmos"),
-            ("Q2", "Earth\tWorld"),
-            ("Q3", "Human\tPerson"),
+        let items = vec![
+            Ok(TextItem::new(
+                "Q1".to_string(),
+                vec!["Universe".to_string(), "Cosmos".to_string()],
+            )
+            .expect("Failed to create TextItem")),
+            Ok(TextItem::new(
+                "Q2".to_string(),
+                vec!["Earth".to_string(), "World".to_string()],
+            )
+            .expect("Failed to create TextItem")),
+            Ok(TextItem::new(
+                "Q3".to_string(),
+                vec!["Human".to_string(), "Person".to_string()],
+            )
+            .expect("Failed to create TextItem")),
         ];
 
-        create_test_data_file(&data_dir, &rows).expect("Failed to create test data");
-
         // Build TextData
-        TextData::build(&data_dir).expect("Failed to build TextData");
+        TextData::build(items, &data_dir).expect("Failed to build TextData");
+        let data = TextData::load(&data_dir).expect("Failed to load TextData");
 
         // Create test embeddings (6 embeddings, 4 dimensions each)
         let embeddings = vec![
@@ -214,7 +187,7 @@ mod tests {
             .expect("Failed to create safetensors");
 
         // Load TextEmbeddings
-        let data = TextEmbeddings::load(&data_dir).expect("Failed to load");
+        let data = TextEmbeddings::load(data, &embeddings_file).expect("Failed to load");
 
         // Test basic properties
         assert_eq!(data.len(), 3);

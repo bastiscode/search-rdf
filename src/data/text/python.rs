@@ -1,8 +1,42 @@
+use std::convert::Infallible;
+
+use crate::data::text::utils::stream_text_items_from_jsonl_file;
 use crate::data::text::{TextData as RustTextData, TextEmbeddings as RustTextEmbeddings};
-use crate::data::{DataSource, Precision};
+use crate::data::{DataSource, Embedding, Precision};
 use anyhow::Result;
 use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyList, PyString};
 
+impl<'py> IntoPyObject<'py> for Precision {
+    type Target = PyString;
+
+    type Output = Bound<'py, Self::Target>;
+
+    type Error = Infallible;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        let s = match self {
+            Precision::Float32 => "float32",
+            Precision::UBinary => "ubinary",
+        };
+        s.into_pyobject(py)
+    }
+}
+impl<'py> IntoPyObject<'py> for Embedding<'py> {
+    type Target = PyAny;
+
+    type Output = Bound<'py, Self::Target>;
+
+    type Error = anyhow::Error;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        let out = match self {
+            Embedding::F32(floats) => PyList::new(py, floats)?.into_any(),
+            Embedding::Binary(bytes) => PyBytes::new(py, bytes).into_any(),
+        };
+        Ok(out)
+    }
+}
 #[derive(Clone)]
 #[pyclass]
 pub struct TextData {
@@ -12,9 +46,16 @@ pub struct TextData {
 #[pymethods]
 impl TextData {
     #[staticmethod]
-    pub fn build(data_dir: &str) -> Result<()> {
-        RustTextData::build(data_dir.as_ref())
+    pub fn from_jsonl(data_file: &str, data_dir: &str) -> Result<()> {
+        let items = stream_text_items_from_jsonl_file(data_file.as_ref());
+        RustTextData::build(items, data_dir.as_ref())
     }
+
+    // #[staticmethod]
+    // pub fn from_sparql_results_json(data_file: &str, data_dir: &str) -> Result<()> {
+    //     let items = ...;
+    //     RustTextData::build(items, data_dir.as_ref())
+    // }
 
     #[staticmethod]
     pub fn load(data_dir: &str) -> Result<Self> {
@@ -72,16 +113,10 @@ impl TextDataIterator {
         slf
     }
 
-    fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<Vec<String>> {
-        while (slf.index as usize) < slf.data.len() {
-            let current = slf.index;
-            slf.index += 1;
-
-            if let Some(fields) = slf.data.fields(current) {
-                return Some(fields.into_iter().map(|s| s.to_string()).collect());
-            }
-        }
-        None
+    fn __next__(&mut self) -> Option<Vec<&str>> {
+        let fields = self.data.fields(self.index)?.collect();
+        self.index += 1;
+        Some(fields)
     }
 }
 
@@ -94,8 +129,8 @@ pub struct TextEmbeddings {
 #[pymethods]
 impl TextEmbeddings {
     #[staticmethod]
-    pub fn load(data_dir: &str) -> Result<Self> {
-        let inner = RustTextEmbeddings::load(data_dir.as_ref())?;
+    pub fn load(data: TextData, embeddings_file: &str) -> Result<Self> {
+        let inner = RustTextEmbeddings::load(data.inner, embeddings_file.as_ref())?;
         Ok(TextEmbeddings { inner })
     }
 
@@ -117,15 +152,5 @@ impl TextEmbeddings {
 
     pub fn model(&self) -> &str {
         self.inner.model()
-    }
-
-    pub fn text_data(&self) -> TextData {
-        TextData {
-            inner: self.inner.text_data().clone(),
-        }
-    }
-
-    pub fn id_from_identifier(&self, identifier: &str) -> Option<u32> {
-        self.inner.text_data().id_from_identifier(identifier)
     }
 }

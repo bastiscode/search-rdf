@@ -22,11 +22,21 @@ impl TrieMap {
         }
     }
 
-    pub fn add<I>(&mut self, identifier: I, id: u32)
+    pub fn add<I>(&mut self, identifier: I, id: u32) -> Result<()>
     where
         I: AsRef<str>,
     {
-        self.trie.insert(identifier.as_ref().as_bytes(), id);
+        if self
+            .trie
+            .insert(identifier.as_ref().as_bytes(), id)
+            .is_some()
+        {
+            return Err(anyhow!(
+                "duplicate identifier found: {}",
+                identifier.as_ref()
+            ));
+        }
+        Ok(())
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
@@ -247,9 +257,9 @@ mod tests {
     fn test_trie_map_basic() {
         let mut map = TrieMap::new();
 
-        map.add("Q1", 0);
-        map.add("Q2", 1);
-        map.add("Q100", 100);
+        map.add("Q1", 0).expect("Failed to add");
+        map.add("Q2", 1).expect("Failed to add");
+        map.add("Q100", 100).expect("Failed to add");
 
         assert_eq!(map.get("Q1"), Some(0));
         assert_eq!(map.get("Q2"), Some(1));
@@ -258,14 +268,25 @@ mod tests {
     }
 
     #[test]
+    fn test_trie_map_duplicate_identifier() {
+        let mut map = TrieMap::new();
+
+        map.add("Q1", 0).expect("Failed to add");
+        let result = map.add("Q1", 1);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("duplicate identifier"));
+    }
+
+    #[test]
     fn test_trie_map_save_load() {
         let temp_dir = tempdir().expect("Failed to create temp dir");
         let path = temp_dir.path().join("trie-map.bin");
 
         let mut map = TrieMap::new();
-        map.add("Alice", 0);
-        map.add("Bob", 1);
-        map.add("Charlie", 2);
+        map.add("Alice", 0).expect("Failed to add");
+        map.add("Bob", 1).expect("Failed to add");
+        map.add("Charlie", 2).expect("Failed to add");
 
         map.save(&path).expect("Failed to save");
         let loaded = TrieMap::load(&path).expect("Failed to load");
@@ -300,9 +321,9 @@ mod tests {
     fn test_ordered_data_map_range() {
         let mut map = OrderedDataMap::new();
 
-        map.add(10, 2).expect("Failed to add");  // offset 0..10
-        map.add(15, 3).expect("Failed to add");  // offset 10..25
-        map.add(8, 1).expect("Failed to add");   // offset 25..33
+        map.add(10, 2).expect("Failed to add"); // offset 0..10
+        map.add(15, 3).expect("Failed to add"); // offset 10..25
+        map.add(8, 1).expect("Failed to add"); // offset 25..33
 
         assert_eq!(map.range(0), Some(0..10));
         assert_eq!(map.range(1), Some(10..25));

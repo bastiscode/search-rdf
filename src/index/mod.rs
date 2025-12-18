@@ -39,35 +39,26 @@ impl Match {
 }
 
 #[derive(Debug, Clone)]
-pub struct SearchParams<F>
-where
-    F: Fn(u32) -> bool,
-{
+pub struct SearchParams {
     /// Number of results to return
     pub k: usize,
     /// Minimum score threshold
     pub min_score: Option<f32>,
     // Perform exact or approximate search
     pub exact: bool,
-    // Filter search results
-    pub filter: Option<F>,
 }
 
-impl Default for SearchParams<fn(u32) -> bool> {
+impl Default for SearchParams {
     fn default() -> Self {
         Self {
             k: 10,
             min_score: None,
             exact: false,
-            filter: None,
         }
     }
 }
 
-impl<F> SearchParams<F>
-where
-    F: Fn(u32) -> bool,
-{
+impl SearchParams {
     pub fn search_k(&self, data: &impl DataSource) -> usize {
         if self.exact {
             self.k * data.max_fields().max(1)
@@ -76,31 +67,19 @@ where
         }
     }
 
-    pub fn k(mut self, k: usize) -> Self {
+    pub fn with_k(mut self, k: usize) -> Self {
         self.k = k;
         self
     }
 
-    pub fn exact(mut self, exact: bool) -> Self {
+    pub fn with_exact(mut self, exact: bool) -> Self {
         self.exact = exact;
         self
     }
 
-    pub fn min_score(mut self, score: f32) -> Self {
+    pub fn with_min_score(mut self, score: f32) -> Self {
         self.min_score = Some(score);
         self
-    }
-
-    pub fn filter<G>(self, filter: G) -> SearchParams<G>
-    where
-        G: Fn(u32) -> bool,
-    {
-        SearchParams {
-            k: self.k,
-            min_score: self.min_score,
-            exact: self.exact,
-            filter: Some(filter),
-        }
     }
 }
 
@@ -124,7 +103,15 @@ pub trait SearchIndex: Send + Sync {
         Self: Sized;
 
     /// Search the index with a query
-    fn search<'e, F>(&self, query: &Self::Query<'e>, params: SearchParams<F>) -> Result<Vec<Match>>
+    fn search(&self, query: &Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>>;
+
+    /// Search the index with a query and filter
+    fn search_with_filter<F>(
+        &self,
+        query: &Self::Query<'_>,
+        params: SearchParams,
+        filter: F,
+    ) -> Result<Vec<Match>>
     where
         F: Fn(u32) -> bool;
 

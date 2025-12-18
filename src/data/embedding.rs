@@ -3,16 +3,14 @@ use crate::data::map::OrderedIdMap;
 use super::DataSource;
 use anyhow::{Result, anyhow};
 use memmap2::Mmap;
-use pyo3::types::{PyBytes, PyList, PyString};
-use pyo3::{Bound, IntoPyObject, PyAny};
 use safetensors::tensor::TensorView;
 use safetensors::{Dtype, SafeTensors};
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
 use std::fs::File;
 use std::mem::size_of;
 use std::path::Path;
 use std::sync::Arc;
+use usearch::ScalarKind;
 
 const F32_SIZE: usize = size_of::<f32>();
 
@@ -22,19 +20,12 @@ pub enum Precision {
     UBinary,
 }
 
-impl<'py> IntoPyObject<'py> for Precision {
-    type Target = PyString;
-
-    type Output = Bound<'py, Self::Target>;
-
-    type Error = Infallible;
-
-    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
-        let s = match self {
-            Precision::Float32 => "float32",
-            Precision::UBinary => "ubinary",
-        };
-        s.into_pyobject(py)
+impl Precision {
+    pub fn to_usearch_scalar_kind(&self) -> ScalarKind {
+        match self {
+            Precision::Float32 => ScalarKind::F32,
+            Precision::UBinary => ScalarKind::B1,
+        }
     }
 }
 
@@ -42,22 +33,6 @@ impl<'py> IntoPyObject<'py> for Precision {
 pub enum Embedding<'a> {
     F32(&'a [f32]),
     Binary(&'a [u8]),
-}
-
-impl<'py> IntoPyObject<'py> for Embedding<'py> {
-    type Target = PyAny;
-
-    type Output = Bound<'py, Self::Target>;
-
-    type Error = anyhow::Error;
-
-    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
-        let out = match self {
-            Embedding::F32(floats) => PyList::new(py, floats)?.into_any(),
-            Embedding::Binary(bytes) => PyBytes::new(py, bytes).into_any(),
-        };
-        Ok(out)
-    }
 }
 
 #[derive(Debug)]

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::data::embedding::Embedding;
 use crate::data::text::python::{TextData, TextEmbeddings};
 use crate::index::Match;
@@ -45,23 +47,26 @@ impl KeywordIndex {
         Ok(KeywordIndex { inner })
     }
 
-    #[pyo3(signature = (query, k=10, exact=false, min_score=None))]
+    #[pyo3(signature = (query, k=10, exact=false, min_score=None, allow_ids=None))]
     pub fn search(
         &self,
         query: &str,
         k: usize,
         exact: bool,
         min_score: Option<f32>,
+        allow_ids: Option<HashSet<u32>>,
     ) -> Result<Vec<Match>> {
-        self.inner.search(
-            query,
-            SearchParams {
-                k,
-                exact,
-                min_score,
-                filter: None::<fn(u32) -> bool>,
-            },
-        )
+        let mut params = SearchParams::default().with_k(k).with_exact(exact);
+        if let Some(min_score) = min_score {
+            params = params.with_min_score(min_score);
+        }
+
+        if let Some(ids) = allow_ids {
+            self.inner
+                .search_with_filter(query, params, move |id| ids.contains(&id))
+        } else {
+            self.inner.search(query, params)
+        }
     }
 }
 
@@ -119,22 +124,27 @@ impl TextEmbeddingIndex {
         Ok(TextEmbeddingIndex { inner })
     }
 
-    #[pyo3(signature = (embedding, k=100, exact=false, min_score=None))]
+    #[pyo3(signature = (embedding, k=100, exact=false, min_score=None, allow_ids=None))]
     pub fn search(
         &self,
         embedding: OwnedEmbedding,
         k: usize,
         exact: bool,
         min_score: Option<f32>,
+        allow_ids: Option<HashSet<u32>>,
     ) -> Result<Vec<Match>> {
-        let params = SearchParams {
-            k,
-            min_score,
-            exact,
-            filter: None::<fn(u32) -> bool>,
-        };
+        let mut params = SearchParams::default().with_k(k).with_exact(exact);
+        if let Some(min_score) = min_score {
+            params = params.with_min_score(min_score);
+        }
 
-        self.inner
-            .search(&Query::Embedding(embedding.as_embedding()), params)
+        let query = Query::Embedding(embedding.as_embedding());
+
+        if let Some(ids) = allow_ids {
+            self.inner
+                .search_with_filter(&query, params, move |id| ids.contains(&id))
+        } else {
+            self.inner.search(&query, params)
+        }
     }
 }

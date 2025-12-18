@@ -349,7 +349,12 @@ impl KeywordIndex {
         matches
     }
 
-    fn search_internal<F>(&self, query: &str, params: SearchParams<F>) -> Result<Vec<Match>>
+    fn search_internal<F>(
+        &self,
+        query: &str,
+        params: SearchParams,
+        filter: Option<F>,
+    ) -> Result<Vec<Match>>
     where
         F: Fn(u32) -> bool,
     {
@@ -358,7 +363,7 @@ impl KeywordIndex {
         let search_k = params.search_k(data);
 
         let filter = move |field_id| {
-            if let Some(ref filter) = params.filter {
+            if let Some(ref filter) = filter {
                 filter(field_id)
             } else {
                 // keep everything if no filter provided
@@ -596,11 +601,20 @@ impl SearchIndex for KeywordIndex {
         "KeywordIndex"
     }
 
-    fn search<'q, F>(&self, query: &Self::Query<'q>, params: SearchParams<F>) -> Result<Vec<Match>>
+    fn search(&self, query: &Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>> {
+        self.search_internal(query, params, None::<fn(u32) -> bool>)
+    }
+
+    fn search_with_filter<F>(
+        &self,
+        query: &Self::Query<'_>,
+        params: SearchParams,
+        filter: F,
+    ) -> Result<Vec<Match>>
     where
         F: Fn(u32) -> bool,
     {
-        self.search_internal(query, params)
+        self.search_internal(query, params, Some(filter))
     }
 }
 
@@ -608,50 +622,12 @@ impl SearchIndex for KeywordIndex {
 mod tests {
     use super::*;
     use crate::data::text::TextData;
-    use std::fs::{File, create_dir_all};
-    use std::io::{BufWriter, Write};
+    use crate::data::text::utils::TextItem;
+    use std::fs::create_dir_all;
     use tempfile::tempdir;
 
-    // Helper to create a data file in the expected format
-    fn create_test_data_file(data_dir: &Path, rows: &[(&str, &str)]) -> Result<()> {
-        std::fs::create_dir_all(data_dir)?;
-        let data_file = data_dir.join("data");
-        let mut file = BufWriter::new(File::create(&data_file)?);
-
-        for (identifier, tsv_row) in rows {
-            // Split tab-separated fields
-            let fields: Vec<_> = tsv_row.split('\t').collect();
-
-            // Write identifier length (u16)
-            let key_bytes = identifier.as_bytes();
-            file.write_all(&(key_bytes.len() as u16).to_le_bytes())?;
-
-            // Write identifier
-            file.write_all(key_bytes)?;
-
-            // Write number of fields (u16)
-            file.write_all(&(fields.len() as u16).to_le_bytes())?;
-
-            // Write each field
-            for field in fields {
-                // Write field length (u32)
-                let value_bytes = field.as_bytes();
-                file.write_all(&(value_bytes.len() as u32).to_le_bytes())?;
-
-                // Write field value
-                file.write_all(value_bytes)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn build_keyword_index(data_dir: &Path, index_dir: &Path) -> KeywordIndex {
-        TextData::build(data_dir).expect("Failed to build data");
-        let data = TextData::load(data_dir).expect("Failed to load data");
-
+    fn build_keyword_index(data: TextData, index_dir: &Path) -> KeywordIndex {
         create_dir_all(index_dir).expect("Failed to create index directory");
-
         KeywordIndex::build(&data, index_dir, ()).expect("Failed to build index");
         KeywordIndex::load(data, index_dir).expect("Failed to load index")
     }
@@ -663,21 +639,30 @@ mod tests {
         let index_dir = temp_dir.path().join("index");
 
         // Create test data: id -> labels
-        let rows = vec![("0", "agar"), ("1", "agar agar")];
+        let items = vec![
+            Ok(TextItem::new("0".to_string(), vec!["agar".to_string()])
+                .expect("Failed to create TextItem")),
+            Ok(TextItem::new("1".to_string(), vec!["agar agar".to_string()])
+                .expect("Failed to create TextItem")),
+        ];
 
-        create_test_data_file(&data_dir, &rows).expect("Failed to create test data");
+        TextData::build(items, &data_dir).expect("Failed to build data");
+        let data = TextData::load(&data_dir).expect("Failed to load data");
 
-        let index = build_keyword_index(&data_dir, &index_dir);
+        let index = build_keyword_index(data, &index_dir);
 
         let matches = index
-            .search("agar", SearchParams::default().k(2).exact(true))
+            .search("agar", SearchParams::default().with_k(2).with_exact(true))
             .expect("Failed to find matches");
         assert_eq!(matches.len(), 2);
         assert!(matches!(matches[0], Match::WithField(0, 0, score) if (score - 1.0).abs() < 1e-6));
         assert!(matches!(matches[1], Match::WithField(1, 0, score) if (score - 0.75).abs() < 1e-6));
 
         let matches = index
-            .search("agar agar", SearchParams::default().k(2).exact(true))
+            .search(
+                "agar agar",
+                SearchParams::default().with_k(2).with_exact(true),
+            )
             .expect("Failed to find matches");
         assert_eq!(matches.len(), 2);
         assert!(matches!(matches[0], Match::WithField(1, 0, score) if (score - 2.0).abs() < 1e-6));
@@ -691,29 +676,43 @@ mod tests {
         let index_dir = temp_dir.path().join("index");
 
         // Create simple test data
-        let rows = vec![("Q30", "United States\tthe U.S. of A")];
+        let items = vec![Ok(TextItem::new(
+            "Q30".to_string(),
+            vec!["United States".to_string(), "the U.S. of A".to_string()],
+        )
+        .expect("Failed to create TextItem"))];
 
-        create_test_data_file(&data_dir, &rows).expect("Failed to create test data");
+        TextData::build(items, &data_dir).expect("Failed to build data");
+        let data = TextData::load(&data_dir).expect("Failed to load data");
 
-        let index = build_keyword_index(&data_dir, &index_dir);
+        let index = build_keyword_index(data, &index_dir);
 
         // Test exact match
         let matches = index
-            .search("United States", SearchParams::default().k(1).exact(true))
+            .search(
+                "United States",
+                SearchParams::default().with_k(1).with_exact(true),
+            )
             .expect("Failed to find matches");
 
         assert!(matches!(matches[0], Match::WithField(0, 0, score) if (score - 2.0).abs() < 1e-6));
 
         // Test partial match
         let matches = index
-            .search("United State", SearchParams::default().k(1).exact(true))
+            .search(
+                "United State",
+                SearchParams::default().with_k(1).with_exact(true),
+            )
             .expect("Failed to find matches");
 
         assert!(matches!(matches[0], Match::WithField(0, 0, score) if (score - 1.75).abs() < 1e-6));
 
         // Test synonym match
         let matches = index
-            .search("the U.S. of A", SearchParams::default().k(1).exact(true))
+            .search(
+                "the U.S. of A",
+                SearchParams::default().with_k(1).with_exact(true),
+            )
             .expect("Failed to find matches");
 
         assert!(matches!(matches[0], Match::WithField(0, 1, score) if (score - 4.0).abs() < 1e-6));
@@ -721,7 +720,10 @@ mod tests {
 
         // Test no match
         let matches = index
-            .search("theunitedstates", SearchParams::default().k(1).exact(true))
+            .search(
+                "theunitedstates",
+                SearchParams::default().with_k(1).with_exact(true),
+            )
             .expect("Failed to find matches");
 
         assert!(matches.is_empty());
