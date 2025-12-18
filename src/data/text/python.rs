@@ -1,11 +1,15 @@
 use std::convert::Infallible;
 
-use crate::data::text::utils::stream_text_items_from_jsonl_file;
+use crate::data::text::item::jsonl::stream_text_items_from_jsonl_file;
+use crate::data::text::item::sparql::{
+    SPARQLResultFormat, stream_text_items_from_sparql_result_file,
+};
 use crate::data::text::{TextData as RustTextData, TextEmbeddings as RustTextEmbeddings};
 use crate::data::{DataSource, Embedding, Precision};
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyList, PyString};
+use sparesults::QueryResultsFormat;
 
 impl<'py> IntoPyObject<'py> for Precision {
     type Target = PyString;
@@ -43,19 +47,45 @@ pub struct TextData {
     pub inner: RustTextData,
 }
 
+impl<'a, 'py> FromPyObject<'a, 'py> for SPARQLResultFormat {
+    type Error = anyhow::Error;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        let s: &str = obj.extract()?;
+        let format = match s.to_lowercase().as_str() {
+            "json" => QueryResultsFormat::Json,
+            "xml" => QueryResultsFormat::Xml,
+            "csv" => QueryResultsFormat::Csv,
+            "tsv" => QueryResultsFormat::Tsv,
+            _ => {
+                return Err(anyhow!(
+                    "Invalid QueryResultsFormat: {}. Expected one of: json, xml, csv, tsv",
+                    s
+                ));
+            }
+        };
+        Ok(SPARQLResultFormat(format))
+    }
+}
+
 #[pymethods]
 impl TextData {
     #[staticmethod]
     pub fn from_jsonl(data_file: &str, data_dir: &str) -> Result<()> {
-        let items = stream_text_items_from_jsonl_file(data_file.as_ref());
+        let items = stream_text_items_from_jsonl_file(data_file.as_ref())?;
         RustTextData::build(items, data_dir.as_ref())
     }
 
-    // #[staticmethod]
-    // pub fn from_sparql_results_json(data_file: &str, data_dir: &str) -> Result<()> {
-    //     let items = ...;
-    //     RustTextData::build(items, data_dir.as_ref())
-    // }
+    #[staticmethod]
+    #[pyo3(signature = (data_file, data_dir, format = SPARQLResultFormat(QueryResultsFormat::Json)))]
+    pub fn from_sparql_result(
+        data_file: &str,
+        data_dir: &str,
+        format: SPARQLResultFormat,
+    ) -> Result<()> {
+        let items = stream_text_items_from_sparql_result_file(data_file.as_ref(), format)?;
+        RustTextData::build(items, data_dir.as_ref())
+    }
 
     #[staticmethod]
     pub fn load(data_dir: &str) -> Result<Self> {

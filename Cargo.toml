@@ -27,6 +27,8 @@ pyo3 = { version = "0.27", features = [
   "abi3-py312",
 ] }
 byte-trie = { path = "./byte-trie" }
+sparesults = "0.3"
+oxrdf = "0.3"
 
 [dev-dependencies]
 tempfile = "3.6"

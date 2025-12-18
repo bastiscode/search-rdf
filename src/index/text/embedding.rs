@@ -317,8 +317,8 @@ impl SearchIndex for TextEmbeddingIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::text::item::TextItem;
     use crate::data::text::{TextData, embedding::TextEmbeddings};
-    use crate::data::text::utils::TextItem;
     use crate::index::EmbeddingParams;
     use crate::index::embedding::Metric;
     use std::collections::HashMap;
@@ -375,12 +375,21 @@ mod tests {
 
         // Create test data (3 rows, 2 fields each = 6 total fields)
         let items = vec![
-            Ok(TextItem::new("Q1".to_string(), vec!["Cat".to_string(), "Feline".to_string()])
-                .expect("Failed to create TextItem")),
-            Ok(TextItem::new("Q2".to_string(), vec!["Dog".to_string(), "Canine".to_string()])
-                .expect("Failed to create TextItem")),
-            Ok(TextItem::new("Q3".to_string(), vec!["Bird".to_string(), "Avian".to_string()])
-                .expect("Failed to create TextItem")),
+            Ok(TextItem::new(
+                "Q1".to_string(),
+                vec!["Cat".to_string(), "Feline".to_string()],
+            )
+            .expect("Failed to create TextItem")),
+            Ok(TextItem::new(
+                "Q2".to_string(),
+                vec!["Dog".to_string(), "Canine".to_string()],
+            )
+            .expect("Failed to create TextItem")),
+            Ok(TextItem::new(
+                "Q3".to_string(),
+                vec!["Bird".to_string(), "Avian".to_string()],
+            )
+            .expect("Failed to create TextItem")),
         ];
 
         // Build TextData
@@ -536,8 +545,10 @@ mod tests {
                 vec!["B".to_string(), "C".to_string(), "D".to_string()],
             )
             .expect("Failed to create TextItem")),
-            Ok(TextItem::new("Q3".to_string(), vec!["E".to_string(), "F".to_string()])
-                .expect("Failed to create TextItem")),
+            Ok(
+                TextItem::new("Q3".to_string(), vec!["E".to_string(), "F".to_string()])
+                    .expect("Failed to create TextItem"),
+            ),
         ];
 
         // Build TextData

@@ -107,7 +107,7 @@ impl DataSource for TextEmbeddings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::text::utils::TextItem;
+    use crate::data::text::item::TextItem;
     use std::collections::HashMap;
     use tempfile::tempdir;
 

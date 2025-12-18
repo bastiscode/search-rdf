@@ -622,7 +622,7 @@ impl SearchIndex for KeywordIndex {
 mod tests {
     use super::*;
     use crate::data::text::TextData;
-    use crate::data::text::utils::TextItem;
+    use crate::data::text::item::TextItem;
     use std::fs::create_dir_all;
     use tempfile::tempdir;
 
@@ -642,8 +642,10 @@ mod tests {
         let items = vec![
             Ok(TextItem::new("0".to_string(), vec!["agar".to_string()])
                 .expect("Failed to create TextItem")),
-            Ok(TextItem::new("1".to_string(), vec!["agar agar".to_string()])
-                .expect("Failed to create TextItem")),
+            Ok(
+                TextItem::new("1".to_string(), vec!["agar agar".to_string()])
+                    .expect("Failed to create TextItem"),
+            ),
         ];
 
         TextData::build(items, &data_dir).expect("Failed to build data");

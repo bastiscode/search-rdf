@@ -1,10 +1,10 @@
 pub mod embedding;
+pub mod item;
 pub mod python;
-pub mod utils;
 pub use embedding::TextEmbeddings;
 
 use crate::data::map::{OrderedDataMap, TrieMap};
-use crate::data::text::utils::TextItem;
+use crate::data::text::item::TextItem;
 
 use super::DataSource;
 use anyhow::{Result, anyhow};

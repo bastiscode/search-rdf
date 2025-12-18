@@ -1,11 +1,8 @@
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use std::{
-    fs::File,
-    io::{BufRead, BufReader, Read},
-    mem::size_of,
-    path::Path,
-};
+use std::mem::size_of;
+pub mod jsonl;
+pub mod sparql;
 
 const U16_SIZE: usize = size_of::<u16>();
 const U32_SIZE: usize = size_of::<u32>();
@@ -98,22 +95,6 @@ impl TextItem {
             (value, consumed)
         })
     }
-}
-
-pub fn stream_text_items_from_jsonl<R: Read>(reader: R) -> impl Iterator<Item = Result<TextItem>> {
-    let buffered = BufReader::new(reader);
-    buffered.lines().map(|line| {
-        let line = line?;
-        let text_item: TextItem = serde_json::from_str(&line)?;
-        text_item.validate()
-    })
-}
-
-pub fn stream_text_items_from_jsonl_file(
-    file_path: &Path,
-) -> impl Iterator<Item = Result<TextItem>> {
-    let file = File::open(file_path).expect("Failed to open JSONL file");
-    stream_text_items_from_jsonl(file)
 }
 
 #[cfg(test)]

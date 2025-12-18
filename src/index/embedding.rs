@@ -496,7 +496,9 @@ mod embedding_index_tests {
 
         // Test search with filter - exclude ID 100
         let results_filtered = index
-            .search_with_filter(&Embedding::F32(&query), SearchParams::default(), |id| id != 100)
+            .search_with_filter(&Embedding::F32(&query), SearchParams::default(), |id| {
+                id != 100
+            })
             .expect("Failed to search with filter");
 
         // Should find ID 200 or 300, but not 100
