@@ -1,11 +1,12 @@
 use std::convert::Infallible;
 
+use crate::data::embedding::EmbeddingRef;
 use crate::data::text::item::jsonl::stream_text_items_from_jsonl_file;
 use crate::data::text::item::sparql::{
     SPARQLResultFormat, stream_text_items_from_sparql_result_file,
 };
 use crate::data::text::{TextData as RustTextData, TextEmbeddings as RustTextEmbeddings};
-use crate::data::{DataSource, Embedding, Precision};
+use crate::data::{DataSource, Precision};
 use anyhow::{Result, anyhow};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyList, PyString};
@@ -25,7 +26,7 @@ impl<'py> IntoPyObject<'py> for Precision {
         s.into_pyobject(py)
     }
 }
-impl<'py> IntoPyObject<'py> for Embedding<'py> {
+impl<'py> IntoPyObject<'py> for EmbeddingRef<'py> {
     type Target = PyAny;
 
     type Output = Bound<'py, Self::Target>;
@@ -34,8 +35,8 @@ impl<'py> IntoPyObject<'py> for Embedding<'py> {
 
     fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
         let out = match self {
-            Embedding::F32(floats) => PyList::new(py, floats)?.into_any(),
-            Embedding::Binary(bytes) => PyBytes::new(py, bytes).into_any(),
+            EmbeddingRef::F32(floats) => PyList::new(py, floats)?.into_any(),
+            EmbeddingRef::Binary(bytes) => PyBytes::new(py, bytes).into_any(),
         };
         Ok(out)
     }
@@ -54,7 +55,6 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SPARQLResultFormat {
         let format = match s.to_lowercase().as_str() {
             "json" => SPARQLResultFormat::JSON,
             "xml" => SPARQLResultFormat::XML,
-            "csv" => SPARQLResultFormat::CSV,
             "tsv" => SPARQLResultFormat::TSV,
             _ => {
                 return Err(anyhow!(

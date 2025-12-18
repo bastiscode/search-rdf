@@ -5,7 +5,7 @@ use crate::data::text::python::{TextData, TextEmbeddings};
 use crate::index::Match;
 use crate::index::SearchIndex;
 use crate::index::SearchParams;
-use crate::index::embedding::{EmbeddingParams, Metric};
+use crate::index::embedding::{EmbeddingIndexParams, Metric};
 use crate::index::text::embedding::{Query, TextEmbeddingIndex as RustTextEmbeddingIndex};
 use crate::index::text::keyword::KeywordIndex as RustKeywordIndex;
 use anyhow::{Result, anyhow};
@@ -70,28 +70,14 @@ impl KeywordIndex {
     }
 }
 
-pub enum OwnedEmbedding {
-    F32(Vec<f32>),
-    Binary(Vec<u8>),
-}
-
-impl OwnedEmbedding {
-    fn as_embedding(&self) -> Embedding<'_> {
-        match self {
-            OwnedEmbedding::F32(vec) => Embedding::F32(vec),
-            OwnedEmbedding::Binary(vec) => Embedding::Binary(vec),
-        }
-    }
-}
-
-impl<'a, 'py> FromPyObject<'a, 'py> for OwnedEmbedding {
+impl<'a, 'py> FromPyObject<'a, 'py> for Embedding {
     type Error = anyhow::Error;
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
         if let Ok(bytes) = obj.extract::<&[u8]>() {
-            Ok(OwnedEmbedding::Binary(bytes.to_vec()))
+            Ok(Embedding::Binary(bytes.to_vec()))
         } else if let Ok(vec) = obj.extract::<Vec<f32>>() {
-            Ok(OwnedEmbedding::F32(vec))
+            Ok(Embedding::F32(vec))
         } else {
             Err(anyhow!(
                 "embedding must be a list of floats or bytes for binary indexes"
@@ -111,9 +97,9 @@ impl TextEmbeddingIndex {
     #[pyo3(signature = (data, index_dir, metric=None))]
     pub fn build(data: &TextEmbeddings, index_dir: &str, metric: Option<Metric>) -> Result<()> {
         let params = if let Some(metric) = metric {
-            EmbeddingParams::default().with_metric(metric)
+            EmbeddingIndexParams::default().with_metric(metric)
         } else {
-            EmbeddingParams::from_precision(data.precision())
+            EmbeddingIndexParams::from_precision(data.precision())
         };
         RustTextEmbeddingIndex::build(&data.inner, index_dir.as_ref(), params)
     }
@@ -127,7 +113,7 @@ impl TextEmbeddingIndex {
     #[pyo3(signature = (embedding, k=100, exact=false, min_score=None, allow_ids=None))]
     pub fn search(
         &self,
-        embedding: OwnedEmbedding,
+        embedding: Embedding,
         k: usize,
         exact: bool,
         min_score: Option<f32>,
@@ -138,7 +124,7 @@ impl TextEmbeddingIndex {
             params = params.with_min_score(min_score);
         }
 
-        let query = Query::Embedding(embedding.as_embedding());
+        let query = Query::Embedding(embedding.as_ref());
 
         if let Some(ids) = allow_ids {
             self.inner

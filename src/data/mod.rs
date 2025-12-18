@@ -2,7 +2,7 @@ pub mod embedding;
 pub mod map;
 pub mod text;
 
-pub use embedding::{Embedding, Embeddings, Precision};
+pub use embedding::{EmbeddingRef, Embeddings, Precision};
 pub use text::{TextData, embedding::TextEmbeddings};
 
 /// Core trait for data sources that can be indexed

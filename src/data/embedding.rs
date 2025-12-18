@@ -29,8 +29,23 @@ impl Precision {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum Embedding {
+    F32(Vec<f32>),
+    Binary(Vec<u8>),
+}
+
+impl Embedding {
+    pub fn as_ref(&self) -> EmbeddingRef<'_> {
+        match self {
+            Embedding::F32(vec) => EmbeddingRef::F32(vec),
+            Embedding::Binary(vec) => EmbeddingRef::Binary(vec),
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
-pub enum Embedding<'a> {
+pub enum EmbeddingRef<'a> {
     F32(&'a [f32]),
     Binary(&'a [u8]),
 }
@@ -131,7 +146,7 @@ impl Tensors {
         }
     }
 
-    pub fn get(&self, idx: usize) -> Option<Embedding<'_>> {
+    pub fn get(&self, idx: usize) -> Option<EmbeddingRef<'_>> {
         let data = self.embedding.data();
 
         match self.precision {
@@ -150,7 +165,7 @@ impl Tensors {
                     return None;
                 }
 
-                Some(Embedding::F32(floats))
+                Some(EmbeddingRef::F32(floats))
             }
             Precision::UBinary => {
                 let data = self.embedding.data();
@@ -162,7 +177,7 @@ impl Tensors {
                     return None;
                 }
 
-                Some(Embedding::Binary(&data[start..end]))
+                Some(EmbeddingRef::Binary(&data[start..end]))
             }
         }
     }
@@ -240,7 +255,7 @@ impl Embeddings {
 }
 
 impl DataSource for Embeddings {
-    type Field<'a> = Embedding<'a>;
+    type Field<'a> = EmbeddingRef<'a>;
 
     fn len(&self) -> usize {
         self.inner.id_map.len()
@@ -377,7 +392,7 @@ mod tests {
         assert_eq!(data.num_fields(999), None);
 
         // Test field access - returns the embedding at field_idx for the given id
-        if let Some(Embedding::F32(embedding)) = data.field(100, 0) {
+        if let Some(EmbeddingRef::F32(embedding)) = data.field(100, 0) {
             assert_eq!(embedding.len(), 4);
             assert!((embedding[0] - 0.1).abs() < 1e-6);
             assert!((embedding[1] - 0.2).abs() < 1e-6);
@@ -385,7 +400,7 @@ mod tests {
             panic!("Expected F32 embedding for id 100");
         }
 
-        if let Some(Embedding::F32(embedding)) = data.field(200, 0) {
+        if let Some(EmbeddingRef::F32(embedding)) = data.field(200, 0) {
             assert_eq!(embedding.len(), 4);
             assert!((embedding[0] - 0.5).abs() < 1e-6);
             assert!((embedding[1] - 0.6).abs() < 1e-6);
@@ -393,7 +408,7 @@ mod tests {
             panic!("Expected F32 embedding for id 200");
         }
 
-        if let Some(Embedding::F32(embedding)) = data.field(300, 0) {
+        if let Some(EmbeddingRef::F32(embedding)) = data.field(300, 0) {
             assert_eq!(embedding.len(), 4);
             assert!((embedding[0] - 0.9).abs() < 1e-6);
             assert!((embedding[1] - 1.0).abs() < 1e-6);

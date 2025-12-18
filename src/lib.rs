@@ -1,5 +1,6 @@
 pub mod data;
 pub mod index;
+pub mod model;
 pub mod utils;
 
 use pyo3::prelude::*;

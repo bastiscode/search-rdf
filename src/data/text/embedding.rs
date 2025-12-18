@@ -1,4 +1,4 @@
-use crate::data::embedding::{Embedding, Precision, Tensors};
+use crate::data::embedding::{EmbeddingRef, Precision, Tensors};
 
 use super::{DataSource, TextData};
 use anyhow::{Result, anyhow};
@@ -46,7 +46,7 @@ impl TextEmbeddings {
         &self.inner.tensors.model
     }
 
-    pub fn embedding_items(&self) -> impl Iterator<Item = (u32, Vec<Embedding<'_>>)> + '_ {
+    pub fn embedding_items(&self) -> impl Iterator<Item = (u32, Vec<EmbeddingRef<'_>>)> + '_ {
         let data_map = self.inner.data.data_map();
         let mut start = 0;
         (0..data_map.len()).filter_map(move |index| {
@@ -208,11 +208,11 @@ mod tests {
         let (id, embs) = &items[0];
         assert_eq!(*id, 0);
         assert_eq!(embs.len(), 2); // 2 fields
-        if let Embedding::F32(emb) = embs[0] {
+        if let EmbeddingRef::F32(emb) = embs[0] {
             assert!((emb[0] - 0.1).abs() < 1e-6);
             assert!((emb[1] - 0.2).abs() < 1e-6);
         }
-        if let Embedding::F32(emb) = embs[1] {
+        if let EmbeddingRef::F32(emb) = embs[1] {
             assert!((emb[0] - 0.5).abs() < 1e-6);
             assert!((emb[1] - 0.6).abs() < 1e-6);
         }

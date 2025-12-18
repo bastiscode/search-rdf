@@ -20,7 +20,6 @@ use crate::data::text::item::TextItem;
 pub enum SPARQLResultFormat {
     JSON,
     XML,
-    CSV,
     TSV,
 }
 
@@ -29,7 +28,6 @@ impl From<SPARQLResultFormat> for QueryResultsFormat {
         match format {
             SPARQLResultFormat::JSON => QueryResultsFormat::Json,
             SPARQLResultFormat::XML => QueryResultsFormat::Xml,
-            SPARQLResultFormat::CSV => QueryResultsFormat::Csv,
             SPARQLResultFormat::TSV => QueryResultsFormat::Tsv,
         }
     }
@@ -319,5 +317,99 @@ mod tests {
                 .to_string()
                 .contains("Expected first variable to be an IRI")
         );
+    }
+
+    #[test]
+    fn test_stream_xml_format_single_identifier() {
+        let sparql_xml = r#"<?xml version="1.0"?>
+<sparql xmlns="http://www.w3.org/2005/sparql-results#">
+  <head>
+    <variable name="s"/>
+    <variable name="label"/>
+  </head>
+  <results>
+    <result>
+      <binding name="s"><uri>http://example.org/Q1</uri></binding>
+      <binding name="label"><literal>Universe</literal></binding>
+    </result>
+    <result>
+      <binding name="s"><uri>http://example.org/Q1</uri></binding>
+      <binding name="label"><literal>Cosmos</literal></binding>
+    </result>
+  </results>
+</sparql>"#;
+
+        let cursor = Cursor::new(sparql_xml);
+        let items: Vec<_> = stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::XML)
+            .expect("Failed to create iterator")
+            .collect::<Result<Vec<_>>>()
+            .expect("Failed to parse SPARQL XML");
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].identifier, "http://example.org/Q1");
+        assert_eq!(items[0].fields, vec!["Universe", "Cosmos"]);
+    }
+
+    #[test]
+    fn test_stream_xml_format_multiple_identifiers() {
+        let sparql_xml = r#"<?xml version="1.0"?>
+<sparql xmlns="http://www.w3.org/2005/sparql-results#">
+  <head>
+    <variable name="s"/>
+    <variable name="label"/>
+  </head>
+  <results>
+    <result>
+      <binding name="s"><uri>http://example.org/Q1</uri></binding>
+      <binding name="label"><literal>First</literal></binding>
+    </result>
+    <result>
+      <binding name="s"><uri>http://example.org/Q2</uri></binding>
+      <binding name="label"><literal>Second</literal></binding>
+    </result>
+    <result>
+      <binding name="s"><uri>http://example.org/Q2</uri></binding>
+      <binding name="label"><literal>Another</literal></binding>
+    </result>
+    <result>
+      <binding name="s"><uri>http://example.org/Q3</uri></binding>
+      <binding name="label"><literal>Third</literal></binding>
+    </result>
+  </results>
+</sparql>"#;
+
+        let cursor = Cursor::new(sparql_xml);
+        let items: Vec<_> = stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::XML)
+            .expect("Failed to create iterator")
+            .collect::<Result<Vec<_>>>()
+            .expect("Failed to parse SPARQL XML");
+
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].identifier, "http://example.org/Q1");
+        assert_eq!(items[0].fields, vec!["First"]);
+        assert_eq!(items[1].identifier, "http://example.org/Q2");
+        assert_eq!(items[1].fields, vec!["Second", "Another"]);
+        assert_eq!(items[2].identifier, "http://example.org/Q3");
+        assert_eq!(items[2].fields, vec!["Third"]);
+    }
+
+    #[test]
+    fn test_stream_tsv_format() {
+        let sparql_tsv = "?s\t?label\n\
+            <http://example.org/Q1>\t\"Universe\"\n\
+            <http://example.org/Q1>\t\"Cosmos\"\n\
+            <http://example.org/Q2>\t\"Earth\"";
+
+        let cursor = Cursor::new(sparql_tsv);
+        let items: Vec<_> = stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::TSV)
+            .expect("Failed to create iterator")
+            .collect::<Result<Vec<_>>>()
+            .expect("Failed to parse SPARQL TSV");
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].identifier, "http://example.org/Q1");
+        assert_eq!(items[0].fields, vec!["Universe", "Cosmos"]);
+        assert_eq!(items[1].identifier, "http://example.org/Q2");
+        assert_eq!(items[1].fields, vec!["Earth"]);
     }
 }

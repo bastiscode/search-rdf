@@ -1,8 +1,8 @@
 use crate::data::DataSource;
-use crate::data::embedding::{Embedding, Precision};
+use crate::data::embedding::{EmbeddingRef, Precision};
 use crate::data::text::embedding::TextEmbeddings;
 use crate::index::embedding::Metadata;
-use crate::index::{EmbeddingParams, Match, SearchIndex, SearchParams};
+use crate::index::{EmbeddingIndexParams, Match, SearchIndex, SearchParams};
 use crate::utils::load_u32_vec;
 use crate::utils::{load_json, write_json};
 use anyhow::{Result, anyhow};
@@ -53,7 +53,7 @@ impl TextEmbeddingIndex {
 
     fn search_internal<F>(
         &self,
-        embedding: &Embedding<'_>,
+        embedding: &EmbeddingRef<'_>,
         params: SearchParams,
         filter: Option<F>,
     ) -> Result<Vec<Match>>
@@ -70,7 +70,7 @@ impl TextEmbeddingIndex {
 
         // Validate embedding matches index precision and dimensions
         let results = match (data.precision(), embedding) {
-            (Precision::Float32, Embedding::F32(vec)) => {
+            (Precision::Float32, EmbeddingRef::F32(vec)) => {
                 if vec.len() != data.num_dimensions() {
                     return Err(anyhow!(
                         "Query embedding has {} dimensions, expected {}",
@@ -90,7 +90,7 @@ impl TextEmbeddingIndex {
                     index.search(vec, search_k)?
                 }
             }
-            (Precision::UBinary, Embedding::Binary(bytes)) => {
+            (Precision::UBinary, EmbeddingRef::Binary(bytes)) => {
                 let expected_bytes = data.num_dimensions().div_ceil(8);
                 if bytes.len() != expected_bytes {
                     return Err(anyhow!(
@@ -173,13 +173,13 @@ impl TextEmbeddingIndex {
 
 pub enum Query<'e> {
     String(&'e str),
-    Embedding(Embedding<'e>),
+    Embedding(EmbeddingRef<'e>),
 }
 
 impl SearchIndex for TextEmbeddingIndex {
     type Data = TextEmbeddings;
     type Query<'q> = Query<'q>;
-    type BuildParams = EmbeddingParams;
+    type BuildParams = EmbeddingIndexParams;
 
     fn build(data: &Self::Data, index_dir: &Path, params: Self::BuildParams) -> Result<()> {
         // Validate metric is compatible with precision
@@ -211,10 +211,10 @@ impl SearchIndex for TextEmbeddingIndex {
         for (id, embeddings) in data.embedding_items() {
             for emb in embeddings {
                 match emb {
-                    Embedding::F32(embedding) => {
+                    EmbeddingRef::F32(embedding) => {
                         index.add(field_id as u64, embedding)?;
                     }
-                    Embedding::Binary(embedding) => {
+                    EmbeddingRef::Binary(embedding) => {
                         index.add(field_id as u64, b1x8::from_u8s(embedding))?;
                     }
                 }
@@ -319,7 +319,7 @@ mod tests {
     use super::*;
     use crate::data::text::item::TextItem;
     use crate::data::text::{TextData, embedding::TextEmbeddings};
-    use crate::index::EmbeddingParams;
+    use crate::index::EmbeddingIndexParams;
     use crate::index::embedding::Metric;
     use std::collections::HashMap;
     use std::fs::create_dir_all;
@@ -418,7 +418,7 @@ mod tests {
         // Load data
         let data = TextEmbeddings::load(data, &embeddings_file).expect("Failed to load data");
 
-        let params = EmbeddingParams::from_precision(data.precision());
+        let params = EmbeddingIndexParams::from_precision(data.precision());
 
         TextEmbeddingIndex::build(&data, &index_dir, params).expect("Failed to build index");
         let index = TextEmbeddingIndex::load(data, &index_dir).expect("Failed to load index");
@@ -429,7 +429,7 @@ mod tests {
 
         let results = index
             .search(
-                &Query::Embedding(Embedding::F32(&query)),
+                &Query::Embedding(EmbeddingRef::F32(&query)),
                 SearchParams::default(),
             )
             .expect("Failed to search");
@@ -456,7 +456,7 @@ mod tests {
         // Test search with filter - exclude Q1
         let results_filtered = index
             .search_with_filter(
-                &Query::Embedding(Embedding::F32(&query)),
+                &Query::Embedding(EmbeddingRef::F32(&query)),
                 SearchParams::default(),
                 |id| id != 0,
             )
@@ -504,7 +504,7 @@ mod tests {
         // Load data and build index
         let data = TextEmbeddings::load(data, &embeddings_file).expect("Failed to load data");
 
-        let params = EmbeddingParams::default().with_metric(Metric::InnerProduct);
+        let params = EmbeddingIndexParams::default().with_metric(Metric::InnerProduct);
 
         TextEmbeddingIndex::build(&data, &index_dir, params).expect("Failed to build index");
         let index = TextEmbeddingIndex::load(data, &index_dir).expect("Failed to load index");
@@ -514,7 +514,7 @@ mod tests {
 
         let results = index
             .search(
-                &Query::Embedding(Embedding::F32(&query)),
+                &Query::Embedding(EmbeddingRef::F32(&query)),
                 SearchParams::default(),
             )
             .expect("Failed to search");
@@ -576,7 +576,7 @@ mod tests {
         // Load data and build index
         let data = TextEmbeddings::load(data, &embeddings_file).expect("Failed to load data");
 
-        let params = EmbeddingParams::from_precision(data.precision());
+        let params = EmbeddingIndexParams::from_precision(data.precision());
 
         TextEmbeddingIndex::build(&data, &index_dir, params).expect("Failed to build index");
         let index = TextEmbeddingIndex::load(data, &index_dir).expect("Failed to load index");

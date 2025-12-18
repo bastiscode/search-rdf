@@ -3,7 +3,7 @@ use crate::index::SearchParams;
 use crate::{
     data::{
         DataSource,
-        embedding::{Embedding, Precision},
+        embedding::{EmbeddingRef, Precision},
     },
     index::{Match, SearchIndex},
 };
@@ -28,11 +28,12 @@ pub enum Metric {
     Hamming,
 }
 
-impl Into<MetricKind> for Metric {
-    fn into(self) -> MetricKind {
-        match self {
+impl From<Metric> for MetricKind {
+    fn from(metric: Metric) -> Self {
+        match metric {
+            Metric::CosineNormalized => MetricKind::IP,
             Metric::Cosine => MetricKind::Cos,
-            Metric::CosineNormalized | Metric::InnerProduct => MetricKind::IP,
+            Metric::InnerProduct => MetricKind::IP,
             Metric::L2 => MetricKind::L2sq,
             Metric::Hamming => MetricKind::Hamming,
         }
@@ -89,13 +90,13 @@ impl Metric {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Metadata {
-    pub params: EmbeddingParams,
+    pub params: EmbeddingIndexParams,
     pub precision: Precision,
     pub dimensions: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmbeddingParams {
+pub struct EmbeddingIndexParams {
     /// Metric to use for similarity search
     pub metric: Metric,
     /// Usearch index options
@@ -104,7 +105,7 @@ pub struct EmbeddingParams {
     pub expansion_search: usize,
 }
 
-impl EmbeddingParams {
+impl EmbeddingIndexParams {
     pub fn from_precision(precision: Precision) -> Self {
         Self {
             metric: Metric::default_for_precision(precision),
@@ -133,7 +134,7 @@ impl EmbeddingParams {
     }
 }
 
-impl Default for EmbeddingParams {
+impl Default for EmbeddingIndexParams {
     fn default() -> Self {
         Self {
             metric: Metric::CosineNormalized,
@@ -156,7 +157,7 @@ pub struct EmbeddingIndex {
 impl EmbeddingIndex {
     fn search_internal<'e, F>(
         &self,
-        embedding: Embedding<'e>,
+        embedding: EmbeddingRef<'e>,
         params: SearchParams,
         filter: Option<F>,
     ) -> Result<Vec<Match>>
@@ -172,7 +173,7 @@ impl EmbeddingIndex {
 
         // Validate embedding matches index precision and dimensions
         let results = match (self.inner.data.precision(), embedding) {
-            (Precision::Float32, Embedding::F32(vec)) => {
+            (Precision::Float32, EmbeddingRef::F32(vec)) => {
                 if vec.len() != self.inner.data.num_dimensions() {
                     return Err(anyhow!(
                         "Query embedding has {} dimensions, expected {}",
@@ -192,7 +193,7 @@ impl EmbeddingIndex {
                     index.search(vec, search_k)?
                 }
             }
-            (Precision::UBinary, Embedding::Binary(bytes)) => {
+            (Precision::UBinary, EmbeddingRef::Binary(bytes)) => {
                 let expected_bytes = data.num_dimensions().div_ceil(8);
                 if bytes.len() != expected_bytes {
                     return Err(anyhow!(
@@ -264,8 +265,8 @@ impl EmbeddingIndex {
 
 impl SearchIndex for EmbeddingIndex {
     type Data = Embeddings;
-    type Query<'q> = Embedding<'q>;
-    type BuildParams = EmbeddingParams;
+    type Query<'q> = EmbeddingRef<'q>;
+    type BuildParams = EmbeddingIndexParams;
 
     fn build(data: &Self::Data, index_dir: &Path, params: Self::BuildParams) -> Result<()> {
         // Validate metric is compatible with precision
@@ -296,10 +297,10 @@ impl SearchIndex for EmbeddingIndex {
         for (id, embeddings) in data.items() {
             for emb in embeddings {
                 match emb {
-                    Embedding::F32(embedding) => {
+                    EmbeddingRef::F32(embedding) => {
                         index.add(id as u64, embedding)?;
                     }
-                    Embedding::Binary(embedding) => {
+                    EmbeddingRef::Binary(embedding) => {
                         index.add(id as u64, b1x8::from_u8s(embedding))?;
                     }
                 }
@@ -472,7 +473,7 @@ mod embedding_index_tests {
         Embeddings::build(&data_dir).expect("Failed to build data");
         let data = Embeddings::load(&data_dir).expect("Failed to load data");
 
-        let params = EmbeddingParams::from_precision(data.precision());
+        let params = EmbeddingIndexParams::from_precision(data.precision());
 
         EmbeddingIndex::build(&data, &index_dir, params).expect("Failed to build index");
         let index = EmbeddingIndex::load(data, &index_dir).expect("Failed to load index");
@@ -482,7 +483,7 @@ mod embedding_index_tests {
         normalize(&mut query);
 
         let results = index
-            .search(&Embedding::F32(&query), SearchParams::default())
+            .search(&EmbeddingRef::F32(&query), SearchParams::default())
             .expect("Failed to search");
 
         // Should find ID 100 as top result (deduped from two embeddings)
@@ -502,7 +503,7 @@ mod embedding_index_tests {
 
         // Test search with filter - exclude ID 100
         let results_filtered = index
-            .search_with_filter(&Embedding::F32(&query), SearchParams::default(), |id| {
+            .search_with_filter(&EmbeddingRef::F32(&query), SearchParams::default(), |id| {
                 id != 100
             })
             .expect("Failed to search with filter");
@@ -539,7 +540,7 @@ mod embedding_index_tests {
         Embeddings::build(&data_dir).expect("Failed to build data");
         let data = Embeddings::load(&data_dir).expect("Failed to load data");
 
-        let params = EmbeddingParams::default().with_metric(Metric::InnerProduct);
+        let params = EmbeddingIndexParams::default().with_metric(Metric::InnerProduct);
 
         EmbeddingIndex::build(&data, &index_dir, params).expect("Failed to build index");
         let index = EmbeddingIndex::load(data, &index_dir).expect("Failed to load index");
@@ -548,7 +549,7 @@ mod embedding_index_tests {
         let query = vec![1.0, 1.0, 1.0, 1.0];
 
         let results = index
-            .search(&Embedding::F32(&query), SearchParams::default())
+            .search(&EmbeddingRef::F32(&query), SearchParams::default())
             .expect("Failed to search");
 
         assert!(!results.is_empty());

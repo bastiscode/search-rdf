@@ -6,7 +6,7 @@ use anyhow::Result;
 use pyo3::IntoPyObject;
 use std::path::Path;
 
-pub use embedding::{EmbeddingIndex, EmbeddingParams, Metric};
+pub use embedding::{EmbeddingIndex, EmbeddingIndexParams, Metric};
 pub use text::embedding::TextEmbeddingIndex;
 pub use text::keyword;
 pub use text::keyword::KeywordIndex;

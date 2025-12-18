@@ -25,6 +25,7 @@ class TextEmbeddingModel:
         precision: str = "float32",
         embedding_dim: int | None = None,
         batch_size: int | None = None,
+        normalize: bool = True,
         show_progress: bool = False,
     ) -> np.ndarray:
         """Embed a list of texts.
@@ -74,7 +75,7 @@ class TextEmbeddingModel:
             batch = sorted_texts[i : i + batch_size]
             embeddings = self.encoder.encode(  # type: ignore
                 batch,
-                normalize_embeddings=True,
+                normalize_embeddings=normalize,
                 batch_size=len(batch),
                 precision=precision,  # type: ignore
                 show_progress_bar=False,
