@@ -17,7 +17,23 @@ use sparesults::{
 
 use crate::data::text::item::TextItem;
 
-pub struct SPARQLResultFormat(pub QueryResultsFormat);
+pub enum SPARQLResultFormat {
+    JSON,
+    XML,
+    CSV,
+    TSV,
+}
+
+impl From<SPARQLResultFormat> for QueryResultsFormat {
+    fn from(format: SPARQLResultFormat) -> Self {
+        match format {
+            SPARQLResultFormat::JSON => QueryResultsFormat::Json,
+            SPARQLResultFormat::XML => QueryResultsFormat::Xml,
+            SPARQLResultFormat::CSV => QueryResultsFormat::Csv,
+            SPARQLResultFormat::TSV => QueryResultsFormat::Tsv,
+        }
+    }
+}
 
 pub struct SPARQLResultIterator<I>
 where
@@ -132,7 +148,7 @@ pub fn stream_text_items_from_sparql_result<R: Read>(
     reader: R,
     format: SPARQLResultFormat,
 ) -> Result<impl Iterator<Item = Result<TextItem>>> {
-    let json_parser = QueryResultsParser::from_format(format.0);
+    let json_parser = QueryResultsParser::from_format(format.into());
 
     let parser = json_parser
         .for_reader(reader)
@@ -177,13 +193,10 @@ mod tests {
         }"#;
 
         let cursor = Cursor::new(sparql_json);
-        let items: Vec<_> = stream_text_items_from_sparql_result(
-            cursor,
-            SPARQLResultFormat(QueryResultsFormat::Json),
-        )
-        .expect("Failed to create iterator")
-        .collect::<Result<Vec<_>>>()
-        .expect("Failed to parse SPARQL JSON");
+        let items: Vec<_> = stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
+            .expect("Failed to create iterator")
+            .collect::<Result<Vec<_>>>()
+            .expect("Failed to parse SPARQL JSON");
 
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
@@ -217,13 +230,10 @@ mod tests {
         }"#;
 
         let cursor = Cursor::new(sparql_json);
-        let items: Vec<_> = stream_text_items_from_sparql_result(
-            cursor,
-            SPARQLResultFormat(QueryResultsFormat::Json),
-        )
-        .expect("Failed to create iterator")
-        .collect::<Result<Vec<_>>>()
-        .expect("Failed to parse SPARQL JSON");
+        let items: Vec<_> = stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
+            .expect("Failed to create iterator")
+            .collect::<Result<Vec<_>>>()
+            .expect("Failed to parse SPARQL JSON");
 
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
@@ -244,13 +254,10 @@ mod tests {
         }"#;
 
         let cursor = Cursor::new(sparql_json);
-        let items: Vec<_> = stream_text_items_from_sparql_result(
-            cursor,
-            SPARQLResultFormat(QueryResultsFormat::Json),
-        )
-        .expect("Failed to create iterator")
-        .collect::<Result<Vec<_>>>()
-        .expect("Failed to parse SPARQL JSON");
+        let items: Vec<_> = stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
+            .expect("Failed to create iterator")
+            .collect::<Result<Vec<_>>>()
+            .expect("Failed to parse SPARQL JSON");
 
         assert_eq!(items.len(), 0);
     }
@@ -271,12 +278,10 @@ mod tests {
         }"#;
 
         let cursor = Cursor::new(sparql_json);
-        let result: Result<Vec<_>> = stream_text_items_from_sparql_result(
-            cursor,
-            SPARQLResultFormat(QueryResultsFormat::Json),
-        )
-        .expect("Failed to create iterator")
-        .collect();
+        let result: Result<Vec<_>> =
+            stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
+                .expect("Failed to create iterator")
+                .collect();
 
         assert!(result.is_err());
         assert!(
@@ -302,15 +307,12 @@ mod tests {
         }"#;
 
         let cursor = Cursor::new(sparql_json);
-        let result: Result<Vec<_>> = stream_text_items_from_sparql_result(
-            cursor,
-            SPARQLResultFormat(QueryResultsFormat::Json),
-        )
-        .expect("Failed to create iterator")
-        .collect();
+        let result: Result<Vec<_>> =
+            stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
+                .expect("Failed to create iterator")
+                .collect();
 
         assert!(result.is_err());
-        println!("Error: {}", result.as_ref().unwrap_err());
         assert!(
             result
                 .unwrap_err()

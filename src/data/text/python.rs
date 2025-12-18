@@ -9,7 +9,6 @@ use crate::data::{DataSource, Embedding, Precision};
 use anyhow::{Result, anyhow};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyList, PyString};
-use sparesults::QueryResultsFormat;
 
 impl<'py> IntoPyObject<'py> for Precision {
     type Target = PyString;
@@ -53,10 +52,10 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SPARQLResultFormat {
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
         let s: &str = obj.extract()?;
         let format = match s.to_lowercase().as_str() {
-            "json" => QueryResultsFormat::Json,
-            "xml" => QueryResultsFormat::Xml,
-            "csv" => QueryResultsFormat::Csv,
-            "tsv" => QueryResultsFormat::Tsv,
+            "json" => SPARQLResultFormat::JSON,
+            "xml" => SPARQLResultFormat::XML,
+            "csv" => SPARQLResultFormat::CSV,
+            "tsv" => SPARQLResultFormat::TSV,
             _ => {
                 return Err(anyhow!(
                     "Invalid QueryResultsFormat: {}. Expected one of: json, xml, csv, tsv",
@@ -64,7 +63,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SPARQLResultFormat {
                 ));
             }
         };
-        Ok(SPARQLResultFormat(format))
+        Ok(format)
     }
 }
 
@@ -77,7 +76,7 @@ impl TextData {
     }
 
     #[staticmethod]
-    #[pyo3(signature = (data_file, data_dir, format = SPARQLResultFormat(QueryResultsFormat::Json)))]
+    #[pyo3(signature = (data_file, data_dir, format = SPARQLResultFormat::JSON))]
     pub fn from_sparql_result(
         data_file: &str,
         data_dir: &str,

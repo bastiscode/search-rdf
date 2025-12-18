@@ -28,6 +28,17 @@ pub enum Metric {
     Hamming,
 }
 
+impl Into<MetricKind> for Metric {
+    fn into(self) -> MetricKind {
+        match self {
+            Metric::Cosine => MetricKind::Cos,
+            Metric::CosineNormalized | Metric::InnerProduct => MetricKind::IP,
+            Metric::L2 => MetricKind::L2sq,
+            Metric::Hamming => MetricKind::Hamming,
+        }
+    }
+}
+
 impl Metric {
     pub fn to_score(&self, distance: f32, num_dimensions: usize) -> f32 {
         match self {
@@ -46,12 +57,7 @@ impl Metric {
     }
 
     pub fn to_usearch_metric(self) -> MetricKind {
-        match self {
-            Metric::Cosine => MetricKind::Cos,
-            Metric::CosineNormalized | Metric::InnerProduct => MetricKind::IP,
-            Metric::L2 => MetricKind::L2sq,
-            Metric::Hamming => MetricKind::Hamming,
-        }
+        self.into()
     }
 
     pub fn validate_precision(&self, precision: Precision) -> Result<()> {
