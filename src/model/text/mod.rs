@@ -1,2 +1,2 @@
-pub mod local;
-pub mod text_embedding_inference;
+pub mod sentence_transformer;
+pub mod vllm;

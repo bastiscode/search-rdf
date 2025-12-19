@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::data::Precision;
 use crate::data::embedding::Embedding;
 use crate::data::text::python::{TextData, TextEmbeddings};
 use crate::index::Match;
@@ -26,6 +27,28 @@ impl<'a, 'py> FromPyObject<'a, 'py> for Metric {
             "hamming" => Ok(Metric::Hamming),
             other => Err(anyhow!("unsupported metric: {other}")),
         }
+    }
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for Precision {
+    type Error = anyhow::Error;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        let s: &str = obj.extract()?;
+        let precision = match s.to_lowercase().as_str() {
+            "float32" | "fp32" => Precision::Float32,
+            "binary" | "bit" => Precision::Binary,
+            "float16" | "fp16" => Precision::Float16,
+            "bfloat16" | "bfp16" => Precision::BFloat16,
+            "int8" | "i8" => Precision::Int8,
+            _ => {
+                return Err(anyhow!(
+                    "Invalid Precision: {}. Expected one of: float32, binary, float16, bfloat16, int8",
+                    s
+                ));
+            }
+        };
+        Ok(precision)
     }
 }
 
@@ -70,22 +93,6 @@ impl KeywordIndex {
     }
 }
 
-impl<'a, 'py> FromPyObject<'a, 'py> for Embedding {
-    type Error = anyhow::Error;
-
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
-        if let Ok(bytes) = obj.extract::<&[u8]>() {
-            Ok(Embedding::Binary(bytes.to_vec()))
-        } else if let Ok(vec) = obj.extract::<Vec<f32>>() {
-            Ok(Embedding::F32(vec))
-        } else {
-            Err(anyhow!(
-                "embedding must be a list of floats or bytes for binary indexes"
-            ))
-        }
-    }
-}
-
 #[pyclass]
 pub struct TextEmbeddingIndex {
     inner: RustTextEmbeddingIndex,
@@ -94,12 +101,20 @@ pub struct TextEmbeddingIndex {
 #[pymethods]
 impl TextEmbeddingIndex {
     #[staticmethod]
-    #[pyo3(signature = (data, index_dir, metric=None))]
-    pub fn build(data: &TextEmbeddings, index_dir: &str, metric: Option<Metric>) -> Result<()> {
-        let params = if let Some(metric) = metric {
-            EmbeddingIndexParams::default().with_metric(metric)
+    #[pyo3(signature = (data, index_dir, metric=None, precision=None))]
+    pub fn build(
+        data: &TextEmbeddings,
+        index_dir: &str,
+        metric: Option<Metric>,
+        precision: Option<Precision>,
+    ) -> Result<()> {
+        let mut params = if let Some(precision) = precision {
+            EmbeddingIndexParams::from_precision(precision)
         } else {
-            EmbeddingIndexParams::from_precision(data.precision())
+            EmbeddingIndexParams::default()
+        };
+        if let Some(metric) = metric {
+            params = params.with_metric(metric);
         };
         RustTextEmbeddingIndex::build(&data.inner, index_dir.as_ref(), params)
     }
@@ -128,9 +143,9 @@ impl TextEmbeddingIndex {
 
         if let Some(ids) = allow_ids {
             self.inner
-                .search_with_filter(&query, params, move |id| ids.contains(&id))
+                .search_with_filter(query, params, move |id| ids.contains(&id))
         } else {
-            self.inner.search(&query, params)
+            self.inner.search(query, params)
         }
     }
 }

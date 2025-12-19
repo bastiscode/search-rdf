@@ -17,38 +17,29 @@ const F32_SIZE: usize = size_of::<f32>();
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Precision {
     Float32,
-    UBinary,
+    Float16,
+    BFloat16,
+    Int8,
+    Binary,
 }
 
 impl Precision {
     pub fn to_usearch_scalar_kind(&self) -> ScalarKind {
         match self {
             Precision::Float32 => ScalarKind::F32,
-            Precision::UBinary => ScalarKind::B1,
+            Precision::Float16 => ScalarKind::F16,
+            Precision::BFloat16 => ScalarKind::BF16,
+            Precision::Int8 => ScalarKind::I8,
+            Precision::Binary => ScalarKind::B1,
         }
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum Embedding {
-    F32(Vec<f32>),
-    Binary(Vec<u8>),
-}
+// Only support Float32 for now, to always have the possibility of
+// reranking
+pub type Embedding = Vec<f32>;
 
-impl Embedding {
-    pub fn as_ref(&self) -> EmbeddingRef<'_> {
-        match self {
-            Embedding::F32(vec) => EmbeddingRef::F32(vec),
-            Embedding::Binary(vec) => EmbeddingRef::Binary(vec),
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum EmbeddingRef<'a> {
-    F32(&'a [f32]),
-    Binary(&'a [u8]),
-}
+pub type EmbeddingRef<'a> = &'a [f32];
 
 #[derive(Debug)]
 pub struct Tensors {
@@ -60,7 +51,6 @@ pub struct Tensors {
     embedding: TensorView<'static>,
     id: Option<TensorView<'static>>,
     pub model: String,
-    pub precision: Precision,
 }
 
 impl Tensors {
@@ -84,16 +74,12 @@ impl Tensors {
             ));
         }
 
-        let precision = match embedding.dtype() {
-            Dtype::F32 => Precision::Float32,
-            Dtype::U8 => Precision::UBinary,
-            other => {
-                return Err(anyhow!(
-                    "Unsupported embedding dtype: {:?}. Expected F32 or U8 (for ubinary)",
-                    other
-                ));
-            }
-        };
+        if embedding.dtype() != Dtype::F32 {
+            return Err(anyhow!(
+                "Expected F32 embeddings tensor, got dtype {:?}",
+                embedding.dtype()
+            ));
+        }
 
         let (_, metadata) = SafeTensors::read_metadata(&mmap)?;
         let Some(metadata) = metadata.metadata() else {
@@ -126,7 +112,6 @@ impl Tensors {
             safetensors,
             embedding,
             id,
-            precision,
             model,
         })
     }
@@ -140,46 +125,26 @@ impl Tensors {
     }
 
     pub fn num_dimensions(&self) -> usize {
-        match self.precision {
-            Precision::Float32 => self.embedding.shape()[1],
-            Precision::UBinary => self.embedding.shape()[1] * 8,
-        }
+        self.embedding.shape()[1]
     }
 
     pub fn get(&self, idx: usize) -> Option<EmbeddingRef<'_>> {
         let data = self.embedding.data();
 
-        match self.precision {
-            Precision::Float32 => {
-                let start = idx * self.num_dimensions() * F32_SIZE;
-                let end = start + self.num_dimensions() * F32_SIZE;
+        let start = idx * self.num_dimensions() * F32_SIZE;
+        let end = start + self.num_dimensions() * F32_SIZE;
 
-                if end > data.len() {
-                    return None;
-                }
-
-                let slice = &data[start..end];
-                let (head, floats, tail) = unsafe { slice.align_to::<f32>() };
-
-                if !head.is_empty() || !tail.is_empty() || floats.len() != self.num_dimensions() {
-                    return None;
-                }
-
-                Some(EmbeddingRef::F32(floats))
-            }
-            Precision::UBinary => {
-                let data = self.embedding.data();
-                let bytes_per_embedding = self.num_dimensions().div_ceil(8);
-                let start = idx * bytes_per_embedding;
-                let end = start + bytes_per_embedding;
-
-                if end > data.len() {
-                    return None;
-                }
-
-                Some(EmbeddingRef::Binary(&data[start..end]))
-            }
+        if end > data.len() {
+            return None;
         }
+
+        let slice = &data[start..end];
+        let (head, floats, tail) = unsafe { slice.align_to::<f32>() };
+
+        if !head.is_empty() || !tail.is_empty() || floats.len() != self.num_dimensions() {
+            return None;
+        }
+        Some(floats)
     }
 
     pub fn ids(&self) -> Option<&[u32]> {
@@ -238,11 +203,6 @@ impl Embeddings {
         })
     }
 
-    /// Get the precision of the embeddings
-    pub fn precision(&self) -> Precision {
-        self.inner.tensors.precision
-    }
-
     /// Get the number of dimensions
     pub fn num_dimensions(&self) -> usize {
         self.inner.tensors.num_dimensions()
@@ -261,8 +221,8 @@ impl DataSource for Embeddings {
         self.inner.id_map.len()
     }
 
-    fn num_fields(&self, id: u32) -> Option<usize> {
-        self.inner.id_map.count(id).map(|c| c as usize)
+    fn num_fields(&self, id: u32) -> Option<u16> {
+        self.inner.id_map.count(id)
     }
 
     fn field(&self, id: u32, field: usize) -> Option<Self::Field<'_>> {
@@ -287,8 +247,8 @@ impl DataSource for Embeddings {
         "Embeddings"
     }
 
-    fn total_fields(&self) -> usize {
-        self.inner.id_map.total_count as usize
+    fn total_fields(&self) -> u32 {
+        self.inner.id_map.total_count
     }
 
     fn items(&self) -> impl Iterator<Item = (u32, Vec<Self::Field<'_>>)> + '_ {
@@ -298,8 +258,8 @@ impl DataSource for Embeddings {
         })
     }
 
-    fn max_fields(&self) -> usize {
-        self.inner.id_map.max_count as usize
+    fn max_fields(&self) -> u16 {
+        self.inner.id_map.max_count
     }
 }
 
@@ -382,7 +342,7 @@ mod tests {
         // Test basic properties
         assert_eq!(data.len(), 3);
         assert_eq!(data.num_dimensions(), 4);
-        assert_eq!(data.precision(), Precision::Float32);
+        // Precision is now handled at index level, data is always Float32
         assert_eq!(data.model(), "test-model");
 
         // Test DataSource trait - field(id, field_idx) returns embeddings for that ID
@@ -392,28 +352,29 @@ mod tests {
         assert_eq!(data.num_fields(999), None);
 
         // Test field access - returns the embedding at field_idx for the given id
-        if let Some(EmbeddingRef::F32(embedding)) = data.field(100, 0) {
+        // EmbeddingRef is now just &[f32]
+        if let Some(embedding) = data.field(100, 0) {
             assert_eq!(embedding.len(), 4);
             assert!((embedding[0] - 0.1).abs() < 1e-6);
             assert!((embedding[1] - 0.2).abs() < 1e-6);
         } else {
-            panic!("Expected F32 embedding for id 100");
+            panic!("Expected embedding for id 100");
         }
 
-        if let Some(EmbeddingRef::F32(embedding)) = data.field(200, 0) {
+        if let Some(embedding) = data.field(200, 0) {
             assert_eq!(embedding.len(), 4);
             assert!((embedding[0] - 0.5).abs() < 1e-6);
             assert!((embedding[1] - 0.6).abs() < 1e-6);
         } else {
-            panic!("Expected F32 embedding for id 200");
+            panic!("Expected embedding for id 200");
         }
 
-        if let Some(EmbeddingRef::F32(embedding)) = data.field(300, 0) {
+        if let Some(embedding) = data.field(300, 0) {
             assert_eq!(embedding.len(), 4);
             assert!((embedding[0] - 0.9).abs() < 1e-6);
             assert!((embedding[1] - 1.0).abs() < 1e-6);
         } else {
-            panic!("Expected F32 embedding for id 300");
+            panic!("Expected embedding for id 300");
         }
     }
 

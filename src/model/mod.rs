@@ -3,10 +3,13 @@ use anyhow::Result;
 
 pub mod text;
 
-pub trait EmbeddingModel<I> {
+pub trait EmbeddingModel {
+    type Input: ?Sized;
     type Params;
 
-    fn embed(&self, inputs: &[I], params: Self::Params) -> Result<Vec<Embedding>>;
+    fn embed<I>(&self, inputs: &[I], params: Self::Params) -> Result<Vec<Embedding>>
+    where
+        I: AsRef<Self::Input>;
 
     fn num_dimensions(&self) -> usize;
 

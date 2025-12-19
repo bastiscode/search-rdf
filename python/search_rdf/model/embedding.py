@@ -22,7 +22,6 @@ class TextEmbeddingModel:
     def embed(
         self,
         texts: list[str],
-        precision: str = "float32",
         embedding_dim: int | None = None,
         batch_size: int | None = None,
         normalize: bool = True,
@@ -40,18 +39,10 @@ class TextEmbeddingModel:
         Returns:
             NumPy array of embeddings with shape (len(texts), embedding_dim)
         """
-        assert precision in ["float32", "ubinary"], f"invalid precision {precision}"
-
         if embedding_dim and embedding_dim < self.dim:
             dim = embedding_dim
         else:
             dim = self.dim
-
-        if precision == "ubinary":
-            assert dim % 8 == 0, (
-                "embedding dimension must be a multiple of 8 for binary"
-            )
-            dim = dim // 8
 
         if not texts:
             return np.empty((0, dim))
@@ -77,9 +68,10 @@ class TextEmbeddingModel:
                 batch,
                 normalize_embeddings=normalize,
                 batch_size=len(batch),
-                precision=precision,  # type: ignore
                 show_progress_bar=False,
             )[:, :dim]
+            if embeddings.dtype != np.float32:
+                embeddings = embeddings.astype(np.float32)
             full_embeddings.extend(embeddings)
 
         embeddings = np.vstack(full_embeddings)

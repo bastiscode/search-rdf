@@ -1,4 +1,4 @@
-use crate::data::embedding::{EmbeddingRef, Precision, Tensors};
+use crate::data::embedding::{EmbeddingRef, Tensors};
 
 use super::{DataSource, TextData};
 use anyhow::{Result, anyhow};
@@ -19,7 +19,7 @@ impl TextEmbeddings {
     pub fn load(data: TextData, embeddings_file: &Path) -> Result<Self> {
         let tensors = Tensors::load(embeddings_file)?;
 
-        if data.total_fields() != tensors.len() {
+        if data.total_fields() as usize != tensors.len() {
             return Err(anyhow!(
                 "Number of embeddings ({}) does not match number of text fields ({})",
                 tensors.len(),
@@ -30,10 +30,6 @@ impl TextEmbeddings {
         Ok(Self {
             inner: Arc::new(Inner { data, tensors }),
         })
-    }
-    /// Get the precision of the embeddings
-    pub fn precision(&self) -> Precision {
-        self.inner.tensors.precision
     }
 
     /// Get the number of dimensions
@@ -75,7 +71,7 @@ impl DataSource for TextEmbeddings {
         self.inner.data.len()
     }
 
-    fn num_fields(&self, id: u32) -> Option<usize> {
+    fn num_fields(&self, id: u32) -> Option<u16> {
         self.inner.data.num_fields(id)
     }
 
@@ -91,7 +87,7 @@ impl DataSource for TextEmbeddings {
         "TextEmbeddings"
     }
 
-    fn total_fields(&self) -> usize {
+    fn total_fields(&self) -> u32 {
         self.inner.data.total_fields()
     }
 
@@ -99,7 +95,7 @@ impl DataSource for TextEmbeddings {
         self.inner.data.items()
     }
 
-    fn max_fields(&self) -> usize {
+    fn max_fields(&self) -> u16 {
         self.inner.data.max_fields()
     }
 }
@@ -192,7 +188,7 @@ mod tests {
         // Test basic properties
         assert_eq!(data.len(), 3);
         assert_eq!(data.num_dimensions(), 4);
-        assert_eq!(data.precision(), Precision::Float32);
+        // Precision is now handled at index level, data is always Float32
         assert_eq!(data.model(), "test");
 
         // Test DataSource delegation (text data)
@@ -208,13 +204,13 @@ mod tests {
         let (id, embs) = &items[0];
         assert_eq!(*id, 0);
         assert_eq!(embs.len(), 2); // 2 fields
-        if let EmbeddingRef::F32(emb) = embs[0] {
-            assert!((emb[0] - 0.1).abs() < 1e-6);
-            assert!((emb[1] - 0.2).abs() < 1e-6);
-        }
-        if let EmbeddingRef::F32(emb) = embs[1] {
-            assert!((emb[0] - 0.5).abs() < 1e-6);
-            assert!((emb[1] - 0.6).abs() < 1e-6);
-        }
+        // EmbeddingRef is now just &[f32]
+        let emb = embs[0];
+        assert!((emb[0] - 0.1).abs() < 1e-6);
+        assert!((emb[1] - 0.2).abs() < 1e-6);
+
+        let emb = embs[1];
+        assert!((emb[0] - 0.5).abs() < 1e-6);
+        assert!((emb[1] - 0.6).abs() < 1e-6);
     }
 }

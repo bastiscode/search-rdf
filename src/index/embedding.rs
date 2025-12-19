@@ -63,42 +63,36 @@ impl Metric {
 
     pub fn validate_precision(&self, precision: Precision) -> Result<()> {
         match (self, precision) {
-            (Metric::Hamming, Precision::UBinary) => Ok(()),
-            (Metric::Hamming, Precision::Float32) => {
-                Err(anyhow!("Hamming metric only works with binary embeddings"))
-            }
-            (
-                Metric::Cosine | Metric::CosineNormalized | Metric::InnerProduct | Metric::L2,
-                Precision::Float32,
-            ) => Ok(()),
-            (
-                Metric::Cosine | Metric::CosineNormalized | Metric::InnerProduct | Metric::L2,
-                Precision::UBinary,
-            ) => Err(anyhow!(
-                "Cosine/CosineNormalized/InnerProduct/L2 metrics only work with F32 embeddings"
+            (Metric::Hamming, Precision::Binary) => Ok(()),
+            (Metric::Hamming, _) => Err(anyhow!("Hamming metric only works with binary precision")),
+            (metric, Precision::Binary) => Err(anyhow!(
+                "Metric {:?} does not work with binary precision",
+                metric
             )),
+            _ => Ok(()),
         }
     }
 
     pub fn default_for_precision(precision: Precision) -> Self {
         match precision {
-            Precision::Float32 => Metric::CosineNormalized,
-            Precision::UBinary => Metric::Hamming,
+            Precision::Binary => Metric::Hamming,
+            _ => Metric::CosineNormalized,
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Metadata {
-    pub params: EmbeddingIndexParams,
-    pub precision: Precision,
-    pub dimensions: usize,
+    pub index: EmbeddingIndexParams,
+    pub num_dimensions: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingIndexParams {
     /// Metric to use for similarity search
     pub metric: Metric,
+    /// Precision to use for index
+    pub precision: Precision,
     /// Usearch index options
     pub connectivity: usize,
     pub expansion_add: usize,
@@ -109,8 +103,14 @@ impl EmbeddingIndexParams {
     pub fn from_precision(precision: Precision) -> Self {
         Self {
             metric: Metric::default_for_precision(precision),
+            precision,
             ..Default::default()
         }
+    }
+
+    pub fn with_precision(mut self, precision: Precision) -> Self {
+        self.precision = precision;
+        self
     }
 
     pub fn with_metric(mut self, metric: Metric) -> Self {
@@ -138,6 +138,7 @@ impl Default for EmbeddingIndexParams {
     fn default() -> Self {
         Self {
             metric: Metric::CosineNormalized,
+            precision: Precision::BFloat16,
             connectivity: 16,
             expansion_add: 128,
             expansion_search: 64,
@@ -148,6 +149,7 @@ impl Default for EmbeddingIndexParams {
 struct Inner {
     data: Embeddings,
     index: Index,
+    metadata: Metadata,
 }
 
 pub struct EmbeddingIndex {
@@ -166,61 +168,44 @@ impl EmbeddingIndex {
     {
         let data = &self.inner.data;
         let index = &self.inner.index;
+        // TODO: should be not needed anymore once bug in usearch is fixed
+        let is_binary = self.inner.metadata.index.precision == Precision::Binary;
 
+        let num_dimensions = data.num_dimensions();
         let search_k = params.search_k(data);
 
         let predicate = filter.map(|f| move |id| f(id as u32));
 
-        // Validate embedding matches index precision and dimensions
-        let results = match (self.inner.data.precision(), embedding) {
-            (Precision::Float32, EmbeddingRef::F32(vec)) => {
-                if vec.len() != self.inner.data.num_dimensions() {
-                    return Err(anyhow!(
-                        "Query embedding has {} dimensions, expected {}",
-                        vec.len(),
-                        self.inner.data.num_dimensions()
-                    ));
-                }
+        if embedding.len() != num_dimensions {
+            return Err(anyhow!(
+                "Query embedding has {} dimensions, expected {}",
+                embedding.len(),
+                num_dimensions
+            ));
+        }
 
-                if let Some(ref pred) = predicate {
-                    if params.exact {
-                        return Err(anyhow!("Exact search with filter is not supported yet"));
-                    }
-                    index.filtered_search(vec, search_k, pred)?
-                } else if params.exact {
-                    index.exact_search(vec, search_k)?
-                } else {
-                    index.search(vec, search_k)?
+        let results = if is_binary {
+            let binary_emb = binary_quantization(embedding)?;
+            let embedding = b1x8::from_u8s(&binary_emb);
+            if let Some(ref pred) = predicate {
+                if params.exact {
+                    return Err(anyhow!("Exact search with filter is not supported yet"));
                 }
+                index.filtered_search(embedding, search_k, pred)?
+            } else if params.exact {
+                index.exact_search(embedding, search_k)?
+            } else {
+                index.search(embedding, search_k)?
             }
-            (Precision::UBinary, EmbeddingRef::Binary(bytes)) => {
-                let expected_bytes = data.num_dimensions().div_ceil(8);
-                if bytes.len() != expected_bytes {
-                    return Err(anyhow!(
-                        "Query embedding has {} bytes, expected {} ({} bits)",
-                        bytes.len(),
-                        expected_bytes,
-                        data.num_dimensions()
-                    ));
-                }
-
-                let query = b1x8::from_u8s(bytes);
-                if let Some(ref pred) = predicate {
-                    if params.exact {
-                        return Err(anyhow!("Exact search with filter is not supported yet"));
-                    }
-                    index.filtered_search(query, search_k, pred)?
-                } else if params.exact {
-                    index.exact_search(query, search_k)?
-                } else {
-                    index.search(query, search_k)?
-                }
+        } else if let Some(ref pred) = predicate {
+            if params.exact {
+                return Err(anyhow!("Exact search with filter is not supported yet"));
             }
-            _ => {
-                return Err(anyhow!(
-                    "Query embedding type does not match index precision"
-                ));
-            }
+            index.filtered_search(embedding, search_k, pred)?
+        } else if params.exact {
+            index.exact_search(embedding, search_k)?
+        } else {
+            index.search(embedding, search_k)?
         };
 
         let mut matches: Vec<_> = results
@@ -231,8 +216,13 @@ impl EmbeddingIndex {
                 let id = id as u32;
 
                 // usearch returns distances (lower is better) for all metrics.
-                // Convert to a similarity score where higher is better.
-                let score = -distance;
+                // Convert to a score where higher is better.
+                let score = self
+                    .inner
+                    .metadata
+                    .index
+                    .metric
+                    .to_score(distance, num_dimensions);
 
                 // Apply min_score filter
                 if let Some(min_score) = params.min_score
@@ -263,6 +253,25 @@ impl EmbeddingIndex {
     }
 }
 
+pub fn binary_quantization(embedding: &[f32]) -> Result<Vec<u8>> {
+    if !embedding.len().is_multiple_of(8) {
+        return Err(anyhow!(
+            "Embedding length must be a multiple of 8 for binary quantization"
+        ));
+    }
+    let num_bytes = embedding.len() / 8;
+    let mut binary_emb = vec![0u8; num_bytes];
+    for (i, v) in embedding.iter().enumerate() {
+        if *v <= 0.0 {
+            continue;
+        }
+        let byte_index = i / 8;
+        let bit_index = i % 8;
+        binary_emb[byte_index] |= 1 << bit_index;
+    }
+    Ok(binary_emb)
+}
+
 impl SearchIndex for EmbeddingIndex {
     type Data = Embeddings;
     type Query<'q> = EmbeddingRef<'q>;
@@ -270,18 +279,17 @@ impl SearchIndex for EmbeddingIndex {
 
     fn build(data: &Self::Data, index_dir: &Path, params: Self::BuildParams) -> Result<()> {
         // Validate metric is compatible with precision
-        params.metric.validate_precision(data.precision())?;
+        params.metric.validate_precision(params.precision)?;
 
         create_dir_all(index_dir)?;
 
         // Create usearch index
-        let dimensions = data.num_dimensions();
-        let precision = data.precision();
+        let num_dimensions = data.num_dimensions();
 
         let options = IndexOptions {
-            dimensions,
+            dimensions: num_dimensions,
             metric: params.metric.to_usearch_metric(),
-            quantization: precision.to_usearch_scalar_kind(),
+            quantization: params.precision.to_usearch_scalar_kind(),
             connectivity: params.connectivity,
             expansion_add: params.expansion_add,
             expansion_search: params.expansion_search,
@@ -290,19 +298,17 @@ impl SearchIndex for EmbeddingIndex {
 
         let index = Index::new(&options)?;
 
-        index.reserve(data.total_fields())?;
+        index.reserve(data.total_fields() as usize)?;
 
         // Add all embeddings to the index using their IDs as keys (not indices)
         // Multiple embeddings can have the same ID
         for (id, embeddings) in data.items() {
             for emb in embeddings {
-                match emb {
-                    EmbeddingRef::F32(embedding) => {
-                        index.add(id as u64, embedding)?;
-                    }
-                    EmbeddingRef::Binary(embedding) => {
-                        index.add(id as u64, b1x8::from_u8s(embedding))?;
-                    }
+                if params.precision == Precision::Binary {
+                    let binary_emb = binary_quantization(emb)?;
+                    index.add(id as u64, b1x8::from_u8s(&binary_emb))?;
+                } else {
+                    index.add(id as u64, emb)?;
                 }
             }
         }
@@ -313,9 +319,8 @@ impl SearchIndex for EmbeddingIndex {
 
         // Save metadata as JSON
         let metadata = Metadata {
-            params,
-            precision,
-            dimensions,
+            index: params,
+            num_dimensions,
         };
         let metadata_file = index_dir.join("index.metadata");
         let mut writer = BufWriter::new(File::create(&metadata_file)?);
@@ -329,25 +334,16 @@ impl SearchIndex for EmbeddingIndex {
         let metadata_file = index_dir.join("index.metadata");
         let metadata: Metadata = serde_json::from_reader(File::open(&metadata_file)?)?;
 
-        // Validate data precision matches index precision
-        if data.precision() != metadata.precision {
-            return Err(anyhow!(
-                "Data precision {:?} does not match index precision {:?}",
-                data.precision(),
-                metadata.precision
-            ));
-        }
-
         // Load the index
         let index_file = index_dir.join("index.usearch");
 
         let options = IndexOptions {
-            dimensions: metadata.dimensions,
-            metric: metadata.params.metric.to_usearch_metric(),
-            quantization: metadata.precision.to_usearch_scalar_kind(),
-            connectivity: 16,
-            expansion_add: 128,
-            expansion_search: 64,
+            dimensions: metadata.num_dimensions,
+            metric: metadata.index.metric.to_usearch_metric(),
+            quantization: metadata.index.precision.to_usearch_scalar_kind(),
+            connectivity: metadata.index.connectivity,
+            expansion_add: metadata.index.expansion_add,
+            expansion_search: metadata.index.expansion_search,
             multi: true, // Enable multi-index to support duplicate IDs
         };
         let index = Index::new(&options)?;
@@ -355,7 +351,11 @@ impl SearchIndex for EmbeddingIndex {
         index.view(index_file.to_str().ok_or_else(|| anyhow!("Invalid path"))?)?;
 
         Ok(Self {
-            inner: Arc::new(Inner { data, index }),
+            inner: Arc::new(Inner {
+                data,
+                index,
+                metadata,
+            }),
         })
     }
 
@@ -367,27 +367,27 @@ impl SearchIndex for EmbeddingIndex {
         "EmbeddingIndex"
     }
 
-    fn search(&self, query: &Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>> {
-        self.search_internal(*query, params, None::<fn(u32) -> bool>)
+    fn search(&self, query: Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>> {
+        self.search_internal(query, params, None::<fn(u32) -> bool>)
     }
 
     fn search_with_filter<F>(
         &self,
-        query: &Self::Query<'_>,
+        query: Self::Query<'_>,
         params: SearchParams,
         filter: F,
     ) -> Result<Vec<Match>>
     where
         F: Fn(u32) -> bool,
     {
-        self.search_internal(*query, params, Some(filter))
+        self.search_internal(query, params, Some(filter))
     }
 }
 
 #[cfg(test)]
 mod embedding_index_tests {
     use super::*;
-    use crate::data::Embeddings;
+    use crate::data::{Embeddings, Precision};
     use std::collections::HashMap;
     use std::fs::create_dir_all;
     use tempfile::tempdir;
@@ -442,13 +442,11 @@ mod embedding_index_tests {
     }
 
     #[test]
-    fn test_embedding_index_cosine() {
+    fn test_embedding_index() {
         let temp_dir = tempdir().expect("Failed to create temp dir");
         let data_dir = temp_dir.path().join("data");
-        let index_dir = temp_dir.path().join("index");
 
         create_dir_all(&data_dir).expect("Failed to create data dir");
-        create_dir_all(&index_dir).expect("Failed to create index dir");
 
         let embeddings_file = data_dir.join("embedding.safetensors");
 
@@ -469,91 +467,233 @@ mod embedding_index_tests {
         create_test_safetensors(&embeddings_file, embeddings.clone(), ids)
             .expect("Failed to create safetensors");
 
-        // Build data and index
+        // Build data
         Embeddings::build(&data_dir).expect("Failed to build data");
         let data = Embeddings::load(&data_dir).expect("Failed to load data");
 
-        let params = EmbeddingIndexParams::from_precision(data.precision());
+        // Test metrics that work well with normalized embeddings
+        let metrics = vec![Metric::CosineNormalized, Metric::Cosine, Metric::L2];
 
-        EmbeddingIndex::build(&data, &index_dir, params).expect("Failed to build index");
-        let index = EmbeddingIndex::load(data, &index_dir).expect("Failed to load index");
+        // Test all precisions (except Binary which only works with Hamming)
+        let precisions = vec![
+            Precision::Float32,
+            Precision::Float16,
+            Precision::BFloat16,
+            Precision::Int8,
+        ];
 
-        // Test search - query with first embedding
-        let mut query = vec![1.0, 0.0, 0.0, 0.0];
-        normalize(&mut query);
+        for metric in &metrics {
+            for precision in &precisions {
+                let index_dir = temp_dir
+                    .path()
+                    .join(format!("index_{:?}_{:?}", metric, precision));
+                create_dir_all(&index_dir).expect("Failed to create index dir");
 
-        let results = index
-            .search(&EmbeddingRef::F32(&query), SearchParams::default())
-            .expect("Failed to search");
+                let params = EmbeddingIndexParams::default()
+                    .with_metric(*metric)
+                    .with_precision(*precision);
 
-        // Should find ID 100 as top result (deduped from two embeddings)
-        assert!(!results.is_empty());
-        if let Match::Regular(id, _score) = results[0] {
-            assert_eq!(id, 100);
-        } else {
-            panic!("Expected Match::Regular");
+                EmbeddingIndex::build(&data, &index_dir, params).expect("Failed to build index");
+                let index =
+                    EmbeddingIndex::load(data.clone(), &index_dir).expect("Failed to load index");
+
+                let mut query = vec![1.0, 0.0, 0.0, 0.0];
+                normalize(&mut query);
+
+                let results = index
+                    .search(&query, SearchParams::default())
+                    .expect("Failed to search");
+
+                // Should find ID 100 as top result (deduped from two embeddings)
+                assert!(
+                    !results.is_empty(),
+                    "No results for {:?} {:?}",
+                    metric,
+                    precision
+                );
+
+                if let Match::Regular(id, score) = results[0] {
+                    assert_eq!(id, 100, "Expected ID 100 for {:?} {:?}", metric, precision);
+
+                    // Verify score is in expected range
+                    match metric {
+                        Metric::CosineNormalized | Metric::Cosine => {
+                            // Score should be close to 1.0 for perfect match (allowing for quantization error)
+                            assert!(
+                                score > 0.9,
+                                "Cosine score too low: {} for {:?} {:?}",
+                                score,
+                                metric,
+                                precision
+                            );
+                        }
+                        Metric::L2 => {
+                            // L2 score = 1.0 / (1.0 + distance), perfect match = 1.0
+                            assert!(
+                                score > 0.5,
+                                "L2 score too low: {} for {:?} {:?}",
+                                score,
+                                metric,
+                                precision
+                            );
+                        }
+                        _ => {}
+                    }
+                } else {
+                    panic!("Expected Match::Regular for {:?} {:?}", metric, precision);
+                }
+
+                // Verify deduplication: ID 100 should appear only once despite having 2 embeddings
+                let id_100_count = results
+                    .iter()
+                    .filter(|m| matches!(m, Match::Regular(100, _)))
+                    .count();
+                assert_eq!(
+                    id_100_count, 1,
+                    "Deduplication failed for {:?} {:?}",
+                    metric, precision
+                );
+
+                // Test search with filter - exclude ID 100
+                let results_filtered = index
+                    .search_with_filter(&query, SearchParams::default(), |id| id != 100)
+                    .expect("Failed to search with filter");
+
+                // Should find ID 200 or 300, but not 100
+                assert!(
+                    !results_filtered.is_empty(),
+                    "No filtered results for {:?} {:?}",
+                    metric,
+                    precision
+                );
+                if let Match::Regular(id, _) = results_filtered[0] {
+                    assert_ne!(id, 100, "Filter failed for {:?} {:?}", metric, precision);
+                } else {
+                    panic!("Expected Match::Regular for {:?} {:?}", metric, precision);
+                }
+            }
         }
 
-        // Verify deduplication: ID 100 should appear only once despite having 2 embeddings
-        let id_100_count = results
-            .iter()
-            .filter(|m| matches!(m, Match::Regular(100, _)))
-            .count();
-        assert_eq!(id_100_count, 1);
+        // Test InnerProduct metric with unnormalized embeddings
+        let data_dir_ip = temp_dir.path().join("data_ip");
+        create_dir_all(&data_dir_ip).expect("Failed to create data dir");
+        let embeddings_file_ip = data_dir_ip.join("embedding.safetensors");
 
-        // Test search with filter - exclude ID 100
-        let results_filtered = index
-            .search_with_filter(&EmbeddingRef::F32(&query), SearchParams::default(), |id| {
-                id != 100
-            })
-            .expect("Failed to search with filter");
+        // Create unnormalized embeddings
+        let embeddings_ip = vec![
+            vec![2.0, 0.0, 0.0, 0.0], // ID 100
+            vec![1.8, 0.2, 0.0, 0.0], // ID 100 (duplicate - similar)
+            vec![0.0, 2.0, 0.0, 0.0], // ID 200
+            vec![0.0, 0.0, 2.0, 0.0], // ID 300
+        ];
 
-        // Should find ID 200 or 300, but not 100
-        assert!(!results_filtered.is_empty());
-        if let Match::Regular(id, _score) = results_filtered[0] {
-            assert_ne!(id, 100);
-        } else {
-            panic!("Expected Match::Regular");
-        }
-    }
-
-    #[test]
-    fn test_embedding_index_inner_product() {
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let data_dir = temp_dir.path().join("data");
-        let index_dir = temp_dir.path().join("index");
-
-        create_dir_all(&data_dir).expect("Failed to create data dir");
-        create_dir_all(&index_dir).expect("Failed to create index dir");
-
-        let embeddings_file = data_dir.join("embedding.safetensors");
-
-        // Create test embeddings (not normalized)
-        let embeddings = vec![vec![1.0, 2.0, 3.0, 4.0], vec![4.0, 3.0, 2.0, 1.0]];
-
-        let ids = vec![10, 20];
-
-        create_test_safetensors(&embeddings_file, embeddings, ids)
+        create_test_safetensors(&embeddings_file_ip, embeddings_ip, vec![100, 100, 200, 300])
             .expect("Failed to create safetensors");
 
-        // Build data and index
-        Embeddings::build(&data_dir).expect("Failed to build data");
-        let data = Embeddings::load(&data_dir).expect("Failed to load data");
+        Embeddings::build(&data_dir_ip).expect("Failed to build data");
+        let data_ip = Embeddings::load(&data_dir_ip).expect("Failed to load data");
 
-        let params = EmbeddingIndexParams::default().with_metric(Metric::InnerProduct);
+        for precision in &precisions {
+            let index_dir = temp_dir
+                .path()
+                .join(format!("index_InnerProduct_{:?}", precision));
+            create_dir_all(&index_dir).expect("Failed to create index dir");
 
-        EmbeddingIndex::build(&data, &index_dir, params).expect("Failed to build index");
-        let index = EmbeddingIndex::load(data, &index_dir).expect("Failed to load index");
+            let params = EmbeddingIndexParams::default()
+                .with_metric(Metric::InnerProduct)
+                .with_precision(*precision);
 
-        // Test search
-        let query = vec![1.0, 1.0, 1.0, 1.0];
+            EmbeddingIndex::build(&data_ip, &index_dir, params).expect("Failed to build index");
+            let index =
+                EmbeddingIndex::load(data_ip.clone(), &index_dir).expect("Failed to load index");
 
-        let results = index
-            .search(&EmbeddingRef::F32(&query), SearchParams::default())
+            let query_ip = vec![1.0, 0.0, 0.0, 0.0]; // Unnormalized query
+
+            let results = index
+                .search(&query_ip, SearchParams::default())
+                .expect("Failed to search");
+
+            assert!(
+                !results.is_empty(),
+                "No results for InnerProduct {:?}",
+                precision
+            );
+
+            if let Match::Regular(id, score) = results[0] {
+                assert_eq!(id, 100, "Expected ID 100 for InnerProduct {:?}", precision);
+                // Inner product of [1,0,0,0] with [2,0,0,0] = 2.0
+                // With IP metric, usearch distance = 1.0 - IP = 1.0 - 2.0 = -1.0
+                // Score = -distance = -(-1.0) = 1.0, but need to account for quantization
+                assert!(
+                    score.abs() > 0.1,
+                    "IP score too small: {} for {:?}",
+                    score,
+                    precision
+                );
+            } else {
+                panic!("Expected Match::Regular for InnerProduct {:?}", precision);
+            }
+        }
+
+        // Test Hamming metric with Binary precision
+        // Binary precision in usearch expects dimensions to be multiples of 8 bits (1 byte)
+        // Since we're storing float32 vectors and converting to binary, use 32D (4 bytes packed)
+        let data_dir_hamming = temp_dir.path().join("data_hamming");
+        create_dir_all(&data_dir_hamming).expect("Failed to create data dir");
+        let embeddings_file_hamming = data_dir_hamming.join("embedding.safetensors");
+
+        // Create 32-dimensional binary-like embeddings (4 bytes when packed)
+        let mut emb1 = vec![1.0; 16];
+        emb1.extend(vec![0.0; 16]);
+        let mut emb2 = vec![1.0; 14];
+        emb2.extend(vec![0.0; 18]);
+        let mut emb3 = vec![0.0; 16];
+        emb3.extend(vec![1.0; 16]);
+        let mut emb4 = vec![0.0; 14];
+        emb4.extend(vec![1.0; 18]);
+
+        let embeddings_hamming = vec![emb1, emb2, emb3, emb4];
+
+        create_test_safetensors(
+            &embeddings_file_hamming,
+            embeddings_hamming.clone(),
+            vec![100, 100, 200, 300],
+        )
+        .expect("Failed to create safetensors");
+
+        Embeddings::build(&data_dir_hamming).expect("Failed to build data");
+        let data_hamming = Embeddings::load(&data_dir_hamming).expect("Failed to load data");
+
+        let index_dir_hamming = temp_dir.path().join("index_hamming");
+        create_dir_all(&index_dir_hamming).expect("Failed to create index dir");
+
+        let params = EmbeddingIndexParams::default()
+            .with_metric(Metric::Hamming)
+            .with_precision(Precision::Binary);
+
+        EmbeddingIndex::build(&data_hamming, &index_dir_hamming, params)
+            .expect("Failed to build index");
+        let index_hamming =
+            EmbeddingIndex::load(data_hamming, &index_dir_hamming).expect("Failed to load index");
+
+        let mut query_hamming = vec![1.0; 16];
+        query_hamming.extend(vec![0.0; 16]);
+
+        let results = index_hamming
+            .search(&query_hamming, SearchParams::default())
             .expect("Failed to search");
 
-        assert!(!results.is_empty());
-        // Both should have same score: 1*1 + 2*1 + 3*1 + 4*1 = 10
-        assert_eq!(results.len(), 2);
+        assert!(!results.is_empty(), "No results for Hamming Binary");
+        if let Match::Regular(id, score) = results[0] {
+            assert_eq!(id, 100, "Expected ID 100 for Hamming Binary");
+            // Hamming score should be in [0, 1] where 1 is identical
+            assert!(
+                score >= 0.0 && score <= 1.0,
+                "Hamming score out of range: {}",
+                score
+            );
+        } else {
+            panic!("Expected Match::Regular for Hamming Binary");
+        }
     }
 }

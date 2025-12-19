@@ -61,7 +61,7 @@ impl Default for SearchParams {
 impl SearchParams {
     pub fn search_k(&self, data: &impl DataSource) -> usize {
         if self.exact {
-            self.k * data.max_fields().max(1)
+            self.k * data.max_fields().max(1) as usize
         } else {
             (self.k as f32 * data.avg_fields()).ceil() as usize
         }
@@ -103,12 +103,12 @@ pub trait SearchIndex: Send + Sync {
         Self: Sized;
 
     /// Search the index with a query
-    fn search(&self, query: &Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>>;
+    fn search(&self, query: Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>>;
 
     /// Search the index with a query and filter
     fn search_with_filter<F>(
         &self,
-        query: &Self::Query<'_>,
+        query: Self::Query<'_>,
         params: SearchParams,
         filter: F,
     ) -> Result<Vec<Match>>

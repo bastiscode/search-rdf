@@ -20,7 +20,8 @@ pub trait DataSource: Send + Sync + Clone {
     }
 
     /// Number of fields across all data points
-    fn total_fields(&self) -> usize;
+    /// u32::MAX is max supported
+    fn total_fields(&self) -> u32;
 
     /// Avg. number of fields per data point
     fn avg_fields(&self) -> f32 {
@@ -28,11 +29,12 @@ pub trait DataSource: Send + Sync + Clone {
     }
 
     /// Max number of fields for any single data point
-    fn max_fields(&self) -> usize;
+    /// u16::MAX is max supported per data point
+    fn max_fields(&self) -> u16;
 
     /// Get number of searchable fields for a data point
     /// Returns None if the ID is invalid
-    fn num_fields(&self, id: u32) -> Option<usize>;
+    fn num_fields(&self, id: u32) -> Option<u16>;
 
     /// Get a specific field value for a data point
     fn field(&self, id: u32, field: usize) -> Option<Self::Field<'_>>;

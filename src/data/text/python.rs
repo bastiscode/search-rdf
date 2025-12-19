@@ -1,6 +1,5 @@
 use std::convert::Infallible;
 
-use crate::data::embedding::EmbeddingRef;
 use crate::data::text::item::jsonl::stream_text_items_from_jsonl_file;
 use crate::data::text::item::sparql::{
     SPARQLResultFormat, stream_text_items_from_sparql_result_file,
@@ -9,7 +8,7 @@ use crate::data::text::{TextData as RustTextData, TextEmbeddings as RustTextEmbe
 use crate::data::{DataSource, Precision};
 use anyhow::{Result, anyhow};
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyList, PyString};
+use pyo3::types::PyString;
 
 impl<'py> IntoPyObject<'py> for Precision {
     type Target = PyString;
@@ -21,26 +20,15 @@ impl<'py> IntoPyObject<'py> for Precision {
     fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
         let s = match self {
             Precision::Float32 => "float32",
-            Precision::UBinary => "ubinary",
+            Precision::Binary => "ubinary",
+            Precision::Float16 => "float16",
+            Precision::BFloat16 => "bfloat16",
+            Precision::Int8 => "int8",
         };
         s.into_pyobject(py)
     }
 }
-impl<'py> IntoPyObject<'py> for EmbeddingRef<'py> {
-    type Target = PyAny;
 
-    type Output = Bound<'py, Self::Target>;
-
-    type Error = anyhow::Error;
-
-    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
-        let out = match self {
-            EmbeddingRef::F32(floats) => PyList::new(py, floats)?.into_any(),
-            EmbeddingRef::Binary(bytes) => PyBytes::new(py, bytes).into_any(),
-        };
-        Ok(out)
-    }
-}
 #[derive(Clone)]
 #[pyclass]
 pub struct TextData {
@@ -107,7 +95,7 @@ impl TextData {
         }
     }
 
-    pub fn num_fields(&self, id: u32) -> Option<usize> {
+    pub fn num_fields(&self, id: u32) -> Option<u16> {
         self.inner.num_fields(id)
     }
 
@@ -173,10 +161,6 @@ impl TextEmbeddings {
 
     pub fn num_dimensions(&self) -> usize {
         self.inner.num_dimensions()
-    }
-
-    pub fn precision(&self) -> Precision {
-        self.inner.precision()
     }
 
     pub fn model(&self) -> &str {

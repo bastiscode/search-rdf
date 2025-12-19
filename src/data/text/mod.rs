@@ -103,8 +103,8 @@ impl DataSource for TextData {
         self.inner.data_map.len()
     }
 
-    fn num_fields(&self, id: u32) -> Option<usize> {
-        self.inner.data_map.count(id as usize).map(|c| c as usize)
+    fn num_fields(&self, id: u32) -> Option<u16> {
+        self.inner.data_map.count(id as usize)
     }
 
     fn field(&self, id: u32, field: usize) -> Option<&str> {
@@ -132,8 +132,8 @@ impl DataSource for TextData {
         "TextData"
     }
 
-    fn total_fields(&self) -> usize {
-        self.inner.data_map.total_count as usize
+    fn total_fields(&self) -> u32 {
+        self.inner.data_map.total_count
     }
 
     fn items(&self) -> impl Iterator<Item = (u32, Vec<&str>)> + '_ {
@@ -144,8 +144,8 @@ impl DataSource for TextData {
         })
     }
 
-    fn max_fields(&self) -> usize {
-        self.inner.data_map.max_count as usize
+    fn max_fields(&self) -> u16 {
+        self.inner.data_map.max_count
     }
 }
 

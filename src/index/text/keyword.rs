@@ -510,7 +510,7 @@ impl KeywordIndex {
 
 impl SearchIndex for KeywordIndex {
     type Data = TextData;
-    type Query<'q> = str;
+    type Query<'q> = &'q str;
     type BuildParams = ();
 
     fn build(data: &Self::Data, index_dir: &Path, _params: Self::BuildParams) -> Result<()> {
@@ -525,14 +525,14 @@ impl SearchIndex for KeywordIndex {
         let mut field_id = 0;
         for (id, fields) in data.items() {
             for name in fields.into_iter().map(normalize) {
+                if field_id == u32::MAX {
+                    return Err(anyhow!("too many fields, max {} supported", u32::MAX));
+                }
                 let mut length: u32 = 0;
                 for word in name.split_whitespace() {
                     let inv_list = inv_lists.entry(word.to_string()).or_default();
                     inv_list.push(field_id);
                     length += 1;
-                }
-                if field_id == u32::MAX {
-                    return Err(anyhow!("too many fields, max {} supported", u32::MAX));
                 }
                 field_id += 1;
                 field_to_data_file.write_all(&id.to_le_bytes())?;
@@ -601,13 +601,13 @@ impl SearchIndex for KeywordIndex {
         "KeywordIndex"
     }
 
-    fn search(&self, query: &Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>> {
+    fn search(&self, query: Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>> {
         self.search_internal(query, params, None::<fn(u32) -> bool>)
     }
 
     fn search_with_filter<F>(
         &self,
-        query: &Self::Query<'_>,
+        query: Self::Query<'_>,
         params: SearchParams,
         filter: F,
     ) -> Result<Vec<Match>>
@@ -805,5 +805,157 @@ mod tests {
             Some((1, true))
         );
         assert_eq!(upper_bound(0, values.len(), |i| values[i].cmp(&2)), Some(3));
+    }
+
+    #[test]
+    fn test_field_matching() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let data_dir = temp_dir.path().join("data");
+        let index_dir = temp_dir.path().join("index");
+
+        // Create test data with multiple fields per entity
+        // Entity 0: ["common label", "specific alpha", "specific beta"]
+        // Entity 1: ["common label", "specific gamma", "specific delta"]
+        let items = vec![
+            Ok(TextItem::new(
+                "Entity0".to_string(),
+                vec![
+                    "common label".to_string(),
+                    "specific alpha".to_string(),
+                    "specific beta".to_string(),
+                ],
+            )
+            .expect("Failed to create TextItem")),
+            Ok(TextItem::new(
+                "Entity1".to_string(),
+                vec![
+                    "common label".to_string(),
+                    "specific gamma".to_string(),
+                    "specific delta".to_string(),
+                ],
+            )
+            .expect("Failed to create TextItem")),
+        ];
+
+        TextData::build(items, &data_dir).expect("Failed to build data");
+        let data = TextData::load(&data_dir).expect("Failed to load data");
+        let index = build_keyword_index(data, &index_dir);
+
+        // Test 1: Query "specific alpha" should match Entity0, field 1
+        let matches = index
+            .search(
+                "specific alpha",
+                SearchParams::default().with_k(10).with_exact(true),
+            )
+            .expect("Failed to search");
+
+        assert_eq!(matches.len(), 2);
+        if let Match::WithField(id, field_idx, score) = matches[0] {
+            assert_eq!(id, 0, "Expected Entity0");
+            assert_eq!(field_idx, 1, "Expected field 1 (not the first field)");
+            assert!(score > 1.0, "Expected high score for exact match");
+
+            // Verify actual field text
+            let field_text = index
+                .data()
+                .field(id, field_idx)
+                .expect("Field should exist");
+            assert_eq!(field_text, "specific alpha");
+        } else {
+            panic!("Expected Match::WithField");
+        }
+
+        // Test 2: Query "specific beta" should match Entity0, field 2
+        let matches = index
+            .search(
+                "specific beta",
+                SearchParams::default().with_k(10).with_exact(true),
+            )
+            .expect("Failed to search");
+
+        assert_eq!(matches.len(), 2);
+        if let Match::WithField(id, field_idx, score) = matches[0] {
+            assert_eq!(id, 0, "Expected Entity0");
+            assert_eq!(field_idx, 2, "Expected field 2");
+            assert!(score > 1.0, "Expected high score for exact match");
+
+            let field_text = index
+                .data()
+                .field(id, field_idx)
+                .expect("Field should exist");
+            assert_eq!(field_text, "specific beta");
+        } else {
+            panic!("Expected Match::WithField");
+        }
+
+        // Test 3: Query "specific gamma" should match Entity1, field 1
+        let matches = index
+            .search(
+                "specific gamma",
+                SearchParams::default().with_k(10).with_exact(true),
+            )
+            .expect("Failed to search");
+
+        assert_eq!(matches.len(), 2);
+        if let Match::WithField(id, field_idx, score) = matches[0] {
+            assert_eq!(id, 1, "Expected Entity1");
+            assert_eq!(field_idx, 1, "Expected field 1");
+            assert!(score > 1.0, "Expected high score for exact match");
+
+            let field_text = index
+                .data()
+                .field(id, field_idx)
+                .expect("Field should exist");
+            assert_eq!(field_text, "specific gamma");
+        } else {
+            panic!("Expected Match::WithField");
+        }
+
+        // Test 4: Query "specific delta" should match Entity1, field 2
+        let matches = index
+            .search(
+                "specific delta",
+                SearchParams::default().with_k(10).with_exact(true),
+            )
+            .expect("Failed to search");
+
+        assert_eq!(matches.len(), 2);
+        if let Match::WithField(id, field_idx, score) = matches[0] {
+            assert_eq!(id, 1, "Expected Entity1");
+            assert_eq!(field_idx, 2, "Expected field 2");
+            assert!(score > 1.0, "Expected high score for exact match");
+
+            let field_text = index
+                .data()
+                .field(id, field_idx)
+                .expect("Field should exist");
+            assert_eq!(field_text, "specific delta");
+        } else {
+            panic!("Expected Match::WithField");
+        }
+
+        // Test 5: Query "common" should match both entities but return field 0 for each
+        let matches = index
+            .search(
+                "common",
+                SearchParams::default().with_k(10).with_exact(true),
+            )
+            .expect("Failed to search");
+
+        assert_eq!(matches.len(), 2);
+        for m in matches {
+            if let Match::WithField(id, field_idx, score) = m {
+                assert_eq!(field_idx, 0, "Expected field 0 for 'common' query");
+                assert!(score > 0.0, "Expected positive score");
+
+                let field_text = index
+                    .data()
+                    .field(id, field_idx)
+                    .expect("Field should exist");
+                assert_eq!(field_text, "common label");
+            } else {
+                panic!("Expected Match::WithField");
+            }
+        }
     }
 }
