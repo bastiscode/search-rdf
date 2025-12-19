@@ -93,7 +93,7 @@ pub trait SearchIndex: Send + Sync {
     type BuildParams;
 
     /// Build and save an index
-    fn build(data: &Self::Data, index_dir: &Path, params: Self::BuildParams) -> Result<()>
+    fn build(data: &Self::Data, index_dir: &Path, params: &Self::BuildParams) -> Result<()>
     where
         Self: Sized;
 
@@ -103,13 +103,13 @@ pub trait SearchIndex: Send + Sync {
         Self: Sized;
 
     /// Search the index with a query
-    fn search(&self, query: Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>>;
+    fn search(&self, query: Self::Query<'_>, params: &SearchParams) -> Result<Vec<Match>>;
 
     /// Search the index with a query and filter
     fn search_with_filter<F>(
         &self,
         query: Self::Query<'_>,
-        params: SearchParams,
+        params: &SearchParams,
         filter: F,
     ) -> Result<Vec<Match>>
     where

@@ -3,6 +3,7 @@ use oxrdf::{
     Term,
     vocab::{rdf, xsd},
 };
+use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::{BufReader, Read},
@@ -17,10 +18,23 @@ use sparesults::{
 
 use crate::data::text::item::TextItem;
 
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SPARQLResultFormat {
+    #[default]
     JSON,
     XML,
     TSV,
+}
+
+impl SPARQLResultFormat {
+    pub fn mime_type(&self) -> &str {
+        match self {
+            SPARQLResultFormat::JSON => "application/sparql-results+json",
+            SPARQLResultFormat::XML => "application/sparql-results+xml",
+            SPARQLResultFormat::TSV => "text/tab-separated-values",
+        }
+    }
 }
 
 impl From<SPARQLResultFormat> for QueryResultsFormat {
@@ -165,6 +179,28 @@ pub fn stream_text_items_from_sparql_result_file(
 ) -> Result<impl Iterator<Item = Result<TextItem>>> {
     let reader = BufReader::new(File::open(file_path)?);
     stream_text_items_from_sparql_result(reader, format)
+}
+
+pub fn guess_sparql_result_format_from_extension(file_path: &Path) -> Result<SPARQLResultFormat> {
+    let ext = file_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow!("File has no extension"))?
+        .to_lowercase();
+
+    let format = match ext.as_str() {
+        "json" => SPARQLResultFormat::JSON,
+        "xml" => SPARQLResultFormat::XML,
+        "tsv" => SPARQLResultFormat::TSV,
+        _ => {
+            return Err(anyhow!(
+                "Could not guess SPARQL result format from file extension: {}",
+                ext
+            ));
+        }
+    };
+
+    Ok(format)
 }
 
 #[cfg(test)]

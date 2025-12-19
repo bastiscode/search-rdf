@@ -20,6 +20,7 @@ use usearch::ffi::MetricKind;
 use usearch::{Index, b1x8};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Metric {
     CosineNormalized,
     Cosine,
@@ -87,16 +88,41 @@ pub(crate) struct Metadata {
     pub num_dimensions: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct EmbeddingIndexParams {
     /// Metric to use for similarity search
+    #[serde(default = "default_metric")]
     pub metric: Metric,
     /// Precision to use for index
+    #[serde(default = "default_precision")]
     pub precision: Precision,
     /// Usearch index options
+    #[serde(default = "default_connectivity")]
     pub connectivity: usize,
+    #[serde(default = "default_expansion_add")]
     pub expansion_add: usize,
+    #[serde(default = "default_expansion_search")]
     pub expansion_search: usize,
+}
+
+fn default_metric() -> Metric {
+    Metric::CosineNormalized
+}
+
+fn default_precision() -> Precision {
+    Precision::BFloat16
+}
+
+fn default_connectivity() -> usize {
+    16
+}
+
+fn default_expansion_add() -> usize {
+    128
+}
+
+fn default_expansion_search() -> usize {
+    64
 }
 
 impl EmbeddingIndexParams {
@@ -160,7 +186,7 @@ impl EmbeddingIndex {
     fn search_internal<'e, F>(
         &self,
         embedding: EmbeddingRef<'e>,
-        params: SearchParams,
+        params: &SearchParams,
         filter: Option<F>,
     ) -> Result<Vec<Match>>
     where
@@ -277,7 +303,7 @@ impl SearchIndex for EmbeddingIndex {
     type Query<'q> = EmbeddingRef<'q>;
     type BuildParams = EmbeddingIndexParams;
 
-    fn build(data: &Self::Data, index_dir: &Path, params: Self::BuildParams) -> Result<()> {
+    fn build(data: &Self::Data, index_dir: &Path, params: &Self::BuildParams) -> Result<()> {
         // Validate metric is compatible with precision
         params.metric.validate_precision(params.precision)?;
 
@@ -319,7 +345,7 @@ impl SearchIndex for EmbeddingIndex {
 
         // Save metadata as JSON
         let metadata = Metadata {
-            index: params,
+            index: *params,
             num_dimensions,
         };
         let metadata_file = index_dir.join("index.metadata");
@@ -367,14 +393,14 @@ impl SearchIndex for EmbeddingIndex {
         "EmbeddingIndex"
     }
 
-    fn search(&self, query: Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>> {
+    fn search(&self, query: Self::Query<'_>, params: &SearchParams) -> Result<Vec<Match>> {
         self.search_internal(query, params, None::<fn(u32) -> bool>)
     }
 
     fn search_with_filter<F>(
         &self,
         query: Self::Query<'_>,
-        params: SearchParams,
+        params: &SearchParams,
         filter: F,
     ) -> Result<Vec<Match>>
     where

@@ -352,7 +352,7 @@ impl KeywordIndex {
     fn search_internal<F>(
         &self,
         query: &str,
-        params: SearchParams,
+        params: &SearchParams,
         filter: Option<F>,
     ) -> Result<Vec<Match>>
     where
@@ -513,7 +513,7 @@ impl SearchIndex for KeywordIndex {
     type Query<'q> = &'q str;
     type BuildParams = ();
 
-    fn build(data: &Self::Data, index_dir: &Path, _params: Self::BuildParams) -> Result<()> {
+    fn build(data: &Self::Data, index_dir: &Path, _params: &Self::BuildParams) -> Result<()> {
         create_dir_all(index_dir)?;
 
         let mut inv_lists: HashMap<String, Vec<u32>> = HashMap::new();
@@ -601,14 +601,14 @@ impl SearchIndex for KeywordIndex {
         "KeywordIndex"
     }
 
-    fn search(&self, query: Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>> {
+    fn search(&self, query: Self::Query<'_>, params: &SearchParams) -> Result<Vec<Match>> {
         self.search_internal(query, params, None::<fn(u32) -> bool>)
     }
 
     fn search_with_filter<F>(
         &self,
         query: Self::Query<'_>,
-        params: SearchParams,
+        params: &SearchParams,
         filter: F,
     ) -> Result<Vec<Match>>
     where

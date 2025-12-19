@@ -15,6 +15,7 @@ use usearch::ScalarKind;
 const F32_SIZE: usize = size_of::<f32>();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Precision {
     Float32,
     Float16,

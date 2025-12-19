@@ -54,7 +54,7 @@ impl TextEmbeddingIndex {
     fn search_internal<F>(
         &self,
         embedding: EmbeddingRef<'_>,
-        params: SearchParams,
+        params: &SearchParams,
         filter: Option<F>,
     ) -> Result<Vec<Match>>
     where
@@ -164,7 +164,7 @@ impl SearchIndex for TextEmbeddingIndex {
     type Query<'q> = Query<'q>;
     type BuildParams = EmbeddingIndexParams;
 
-    fn build(data: &Self::Data, index_dir: &Path, params: Self::BuildParams) -> Result<()> {
+    fn build(data: &Self::Data, index_dir: &Path, params: &Self::BuildParams) -> Result<()> {
         // Validate metric is compatible with precision
         params.metric.validate_precision(params.precision)?;
 
@@ -214,7 +214,7 @@ impl SearchIndex for TextEmbeddingIndex {
 
         // Save metadata as JSON
         let metadata = Metadata {
-            index: params,
+            index: *params,
             num_dimensions,
         };
         write_json(&index_dir.join("index.metadata"), &metadata)?;
@@ -261,7 +261,7 @@ impl SearchIndex for TextEmbeddingIndex {
         "TextEmbeddingIndex"
     }
 
-    fn search(&self, query: Self::Query<'_>, params: SearchParams) -> Result<Vec<Match>> {
+    fn search(&self, query: Self::Query<'_>, params: &SearchParams) -> Result<Vec<Match>> {
         match query {
             Query::Embedding(embedding) => {
                 self.search_internal(embedding, params, None::<fn(u32) -> bool>)
@@ -273,7 +273,7 @@ impl SearchIndex for TextEmbeddingIndex {
     fn search_with_filter<F>(
         &self,
         query: Self::Query<'_>,
-        params: SearchParams,
+        params: &SearchParams,
         filter: F,
     ) -> Result<Vec<Match>>
     where
@@ -628,12 +628,20 @@ mod tests {
         let items = vec![
             Ok(TextItem::new(
                 "Entity1".to_string(),
-                vec!["FieldA".to_string(), "FieldB".to_string(), "FieldC".to_string()],
+                vec![
+                    "FieldA".to_string(),
+                    "FieldB".to_string(),
+                    "FieldC".to_string(),
+                ],
             )
             .expect("Failed to create TextItem")),
             Ok(TextItem::new(
                 "Entity2".to_string(),
-                vec!["FieldX".to_string(), "FieldY".to_string(), "FieldZ".to_string()],
+                vec![
+                    "FieldX".to_string(),
+                    "FieldY".to_string(),
+                    "FieldZ".to_string(),
+                ],
             )
             .expect("Failed to create TextItem")),
         ];
@@ -661,14 +669,17 @@ mod tests {
         create_test_safetensors(&embeddings_file, embeddings.clone())
             .expect("Failed to create safetensors");
 
-        let text_embeddings = TextEmbeddings::load(data, &embeddings_file).expect("Failed to load data");
+        let text_embeddings =
+            TextEmbeddings::load(data, &embeddings_file).expect("Failed to load data");
 
         let index_dir = temp_dir.path().join("index");
         create_dir_all(&index_dir).expect("Failed to create index dir");
 
         let params = EmbeddingIndexParams::from_precision(Precision::Float32);
-        TextEmbeddingIndex::build(&text_embeddings, &index_dir, params).expect("Failed to build index");
-        let index = TextEmbeddingIndex::load(text_embeddings.clone(), &index_dir).expect("Failed to load index");
+        TextEmbeddingIndex::build(&text_embeddings, &index_dir, params)
+            .expect("Failed to build index");
+        let index = TextEmbeddingIndex::load(text_embeddings.clone(), &index_dir)
+            .expect("Failed to load index");
 
         // Test 1: Query matching Entity1, field 1 (the middle field)
         let mut query1 = vec![0.0, 1.0, 0.0, 0.0];
@@ -685,9 +696,13 @@ mod tests {
             assert!(score > 0.9, "Score too low: {}", score);
 
             // Retrieve actual field text
-            let field_text = text_embeddings.field(id, field_idx)
+            let field_text = text_embeddings
+                .field(id, field_idx)
                 .expect("Failed to get field text");
-            assert_eq!(field_text, "FieldB", "Expected 'FieldB' as the matched field");
+            assert_eq!(
+                field_text, "FieldB",
+                "Expected 'FieldB' as the matched field"
+            );
         } else {
             panic!("Expected Match::WithField");
         }
@@ -706,9 +721,13 @@ mod tests {
             assert_eq!(field_idx, 2, "Expected field 2 for Entity1");
             assert!(score > 0.9, "Score too low: {}", score);
 
-            let field_text = text_embeddings.field(id, field_idx)
+            let field_text = text_embeddings
+                .field(id, field_idx)
                 .expect("Failed to get field text");
-            assert_eq!(field_text, "FieldC", "Expected 'FieldC' as the matched field");
+            assert_eq!(
+                field_text, "FieldC",
+                "Expected 'FieldC' as the matched field"
+            );
         } else {
             panic!("Expected Match::WithField");
         }
@@ -727,9 +746,13 @@ mod tests {
             assert_eq!(field_idx, 0, "Expected field 0 for Entity2");
             assert!(score > 0.9, "Score too low: {}", score);
 
-            let field_text = text_embeddings.field(id, field_idx)
+            let field_text = text_embeddings
+                .field(id, field_idx)
                 .expect("Failed to get field text");
-            assert_eq!(field_text, "FieldX", "Expected 'FieldX' as the matched field");
+            assert_eq!(
+                field_text, "FieldX",
+                "Expected 'FieldX' as the matched field"
+            );
         } else {
             panic!("Expected Match::WithField");
         }
@@ -748,9 +771,13 @@ mod tests {
             assert_eq!(field_idx, 2, "Expected field 2 for Entity2");
             assert!(score > 0.9, "Score too low: {}", score);
 
-            let field_text = text_embeddings.field(id, field_idx)
+            let field_text = text_embeddings
+                .field(id, field_idx)
                 .expect("Failed to get field text");
-            assert_eq!(field_text, "FieldZ", "Expected 'FieldZ' as the matched field");
+            assert_eq!(
+                field_text, "FieldZ",
+                "Expected 'FieldZ' as the matched field"
+            );
         } else {
             panic!("Expected Match::WithField");
         }

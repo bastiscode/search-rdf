@@ -2,7 +2,8 @@ use std::convert::Infallible;
 
 use crate::data::text::item::jsonl::stream_text_items_from_jsonl_file;
 use crate::data::text::item::sparql::{
-    SPARQLResultFormat, stream_text_items_from_sparql_result_file,
+    SPARQLResultFormat, guess_sparql_result_format_from_extension,
+    stream_text_items_from_sparql_result_file,
 };
 use crate::data::text::{TextData as RustTextData, TextEmbeddings as RustTextEmbeddings};
 use crate::data::{DataSource, Precision};
@@ -64,12 +65,17 @@ impl TextData {
     }
 
     #[staticmethod]
-    #[pyo3(signature = (data_file, data_dir, format = SPARQLResultFormat::JSON))]
+    #[pyo3(signature = (data_file, data_dir, format = None))]
     pub fn from_sparql_result(
         data_file: &str,
         data_dir: &str,
-        format: SPARQLResultFormat,
+        format: Option<SPARQLResultFormat>,
     ) -> Result<()> {
+        let format = if let Some(format) = format {
+            format
+        } else {
+            guess_sparql_result_format_from_extension(data_file.as_ref())?
+        };
         let items = stream_text_items_from_sparql_result_file(data_file.as_ref(), format)?;
         RustTextData::build(items, data_dir.as_ref())
     }

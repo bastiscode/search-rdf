@@ -1,32 +1,42 @@
-use crate::model::EmbeddingModel;
+use crate::model::{EmbeddingModel, EmbeddingParams};
 use anyhow::{Result, anyhow};
 use ureq::Agent;
 
-pub struct VLLMEmbeddingModel {
+pub struct VLLM {
     pub endpoint: String,
     pub model_name: String,
     num_dimensions: usize,
     agent: Agent,
 }
 
-fn embedding_from_value(value: &serde_json::Value) -> Result<Vec<f32>> {
+fn embedding_from_value(value: &serde_json::Value, params: &EmbeddingParams) -> Result<Vec<f32>> {
     let embedding_array = value
         .get("embedding")
         .ok_or_else(|| anyhow!("Missing 'embedding' field in response"))?
         .as_array()
         .ok_or_else(|| anyhow!("'embedding' field is not an array"))?;
 
-    embedding_array
+    let embedding = embedding_array
         .iter()
         .map(|v| {
             v.as_f64()
                 .ok_or_else(|| anyhow!("Embedding value is not a number"))
                 .map(|num| num as f32)
         })
-        .collect()
+        .collect::<Result<_>>()?;
+
+    Ok(params.apply(embedding))
 }
 
-fn embed(agent: &Agent, endpoint: &str, inputs: &[impl AsRef<str>]) -> Result<Vec<Vec<f32>>> {
+fn embed(
+    agent: &Agent,
+    endpoint: &str,
+    inputs: &[impl AsRef<str>],
+    params: &EmbeddingParams,
+) -> Result<Vec<Vec<f32>>> {
+    if inputs.is_empty() {
+        return Ok(vec![]);
+    }
     // Implement the logic to call the VLLM endpoint and retrieve embeddings
     // This is a placeholder implementation
     let response = agent
@@ -43,17 +53,17 @@ fn embed(agent: &Agent, endpoint: &str, inputs: &[impl AsRef<str>]) -> Result<Ve
         .as_array()
         .ok_or_else(|| anyhow!("'data' field is not an array"))?
         .iter()
-        .map(embedding_from_value)
+        .map(|value| embedding_from_value(value, params))
         .collect()
 }
 
-impl VLLMEmbeddingModel {
+impl VLLM {
     pub fn new(endpoint: String, model_name: String) -> Result<Self> {
         let agent = Agent::new_with_defaults();
         let endpoint = format!("{}/v1/embeddings", endpoint);
 
         let test_inputs = vec!["test"];
-        let embeddings = embed(&agent, &endpoint, &test_inputs)?;
+        let embeddings = embed(&agent, &endpoint, &test_inputs, &EmbeddingParams::default())?;
         if embeddings.len() != test_inputs.len() {
             return Err(anyhow!(
                 "Failed to validate VLLM embedding model: unexpected number of embeddings returned"
@@ -70,15 +80,15 @@ impl VLLMEmbeddingModel {
     }
 }
 
-impl EmbeddingModel for VLLMEmbeddingModel {
+impl EmbeddingModel for VLLM {
     type Input = str;
-    type Params = ();
+    type Params = EmbeddingParams;
 
-    fn embed<I>(&self, inputs: &[I], _params: Self::Params) -> Result<Vec<Vec<f32>>>
+    fn embed<I>(&self, inputs: &[I], params: &Self::Params) -> Result<Vec<Vec<f32>>>
     where
         I: AsRef<Self::Input>,
     {
-        embed(&self.agent, &self.endpoint, inputs)
+        embed(&self.agent, &self.endpoint, inputs, params)
     }
 
     fn num_dimensions(&self) -> usize {
@@ -91,5 +101,232 @@ impl EmbeddingModel for VLLMEmbeddingModel {
 
     fn model_type(&self) -> &str {
         "vLLM"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_ENDPOINT: &str = "http://localhost:8000";
+    const TEST_MODEL: &str = "test-embedding-model";
+
+    #[test]
+    #[ignore] // Requires vLLM server running at localhost:8000
+    fn test_load_model() {
+        let result = VLLM::new(TEST_ENDPOINT.to_string(), TEST_MODEL.to_string());
+        assert!(result.is_ok(), "Failed to load model: {:?}", result.err());
+
+        let model = result.unwrap();
+        assert_eq!(model.model_name(), TEST_MODEL);
+        assert_eq!(model.model_type(), "vLLM");
+        assert!(
+            model.num_dimensions() > 0,
+            "Model should have positive dimensions"
+        );
+    }
+
+    #[test]
+    #[ignore] // Requires vLLM server running at localhost:8000
+    fn test_num_dimensions() {
+        let model = VLLM::new(TEST_ENDPOINT.to_string(), TEST_MODEL.to_string())
+            .expect("Failed to load model");
+
+        let dim = model.num_dimensions();
+        assert!(dim > 0, "Model dimensions should be positive");
+
+        // Verify consistency - num_dimensions should match actual embedding dimension
+        let inputs = vec!["test"];
+        let embeddings = model.embed(&inputs, ()).expect("Failed to embed");
+        assert_eq!(
+            embeddings[0].len(),
+            dim,
+            "Embedding dimension should match num_dimensions"
+        );
+    }
+
+    #[test]
+    #[ignore] // Requires vLLM server running at localhost:8000
+    fn test_embed_single_text() {
+        let model = VLLM::new(TEST_ENDPOINT.to_string(), TEST_MODEL.to_string())
+            .expect("Failed to load model");
+
+        let inputs = vec!["This is a test sentence."];
+        let result = model.embed(&inputs, ());
+        assert!(result.is_ok(), "Failed to embed: {:?}", result.err());
+
+        let embeddings = result.unwrap();
+        assert_eq!(embeddings.len(), 1);
+        assert_eq!(embeddings[0].len(), model.num_dimensions());
+
+        // Check that embeddings are not all zeros
+        let sum: f32 = embeddings[0].iter().sum();
+        assert!(sum.abs() > 0.0, "Embeddings should not be all zeros");
+    }
+
+    #[test]
+    #[ignore] // Requires vLLM server running at localhost:8000
+    fn test_embed_multiple_texts() {
+        let model = VLLM::new(TEST_ENDPOINT.to_string(), TEST_MODEL.to_string())
+            .expect("Failed to load model");
+
+        let inputs = vec![
+            "The quick brown fox jumps over the lazy dog.",
+            "Machine learning is a subset of artificial intelligence.",
+            "Rust is a systems programming language.",
+        ];
+        let result = model.embed(&inputs, ());
+        assert!(result.is_ok(), "Failed to embed: {:?}", result.err());
+
+        let embeddings = result.unwrap();
+        assert_eq!(embeddings.len(), 3);
+
+        for (i, embedding) in embeddings.iter().enumerate() {
+            assert_eq!(
+                embedding.len(),
+                model.num_dimensions(),
+                "Embedding {} has wrong dimension",
+                i
+            );
+            // Check that embeddings are not all zeros
+            let sum: f32 = embedding.iter().sum();
+            assert!(sum.abs() > 0.0, "Embedding {} should not be all zeros", i);
+        }
+
+        // Verify that different texts produce different embeddings
+        assert_ne!(embeddings[0], embeddings[1]);
+        assert_ne!(embeddings[1], embeddings[2]);
+        assert_ne!(embeddings[0], embeddings[2]);
+    }
+
+    #[test]
+    #[ignore] // Requires vLLM server running at localhost:8000
+    fn test_embed_with_string_types() {
+        let model = VLLM::new(TEST_ENDPOINT.to_string(), TEST_MODEL.to_string())
+            .expect("Failed to load model");
+
+        // Test with &str
+        let str_inputs = vec!["hello world", "rust programming"];
+        let result1 = model.embed(&str_inputs, ());
+        assert!(result1.is_ok());
+
+        // Test with String
+        let string_inputs = vec!["hello world".to_string(), "rust programming".to_string()];
+        let result2 = model.embed(&string_inputs, ());
+        assert!(result2.is_ok());
+
+        // Extract and compare the embeddings
+        let embeddings1 = result1.unwrap();
+        let embeddings2 = result2.unwrap();
+
+        assert_eq!(embeddings1.len(), embeddings2.len());
+        for i in 0..embeddings1.len() {
+            assert_eq!(
+                embeddings1[i], embeddings2[i],
+                "Embeddings {} differ between &str and String",
+                i
+            );
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires vLLM server running at localhost:8000
+    fn test_embed_empty_input() {
+        let model = VLLM::new(TEST_ENDPOINT.to_string(), TEST_MODEL.to_string())
+            .expect("Failed to load model");
+
+        let inputs: Vec<&str> = vec![];
+        let result = model.embed(&inputs, ());
+        assert!(result.is_ok());
+
+        let embeddings = result.unwrap();
+        assert_eq!(embeddings.len(), 0);
+    }
+
+    #[test]
+    #[ignore] // Requires vLLM server running at localhost:8000
+    fn test_embed_large_batch() {
+        let model = VLLM::new(TEST_ENDPOINT.to_string(), TEST_MODEL.to_string())
+            .expect("Failed to load model");
+
+        // Create a larger batch to test API efficiency
+        let inputs: Vec<String> = (0..100)
+            .map(|i| format!("This is test sentence number {}.", i))
+            .collect();
+
+        let result = model.embed(&inputs, ());
+        assert!(
+            result.is_ok(),
+            "Failed to embed large batch: {:?}",
+            result.err()
+        );
+
+        let embeddings = result.unwrap();
+        assert_eq!(embeddings.len(), 100);
+
+        // Verify all embeddings are valid
+        for embedding in embeddings.iter() {
+            assert_eq!(embedding.len(), model.num_dimensions());
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires vLLM server running at localhost:8000
+    fn test_model_name_and_type() {
+        let model = VLLM::new(TEST_ENDPOINT.to_string(), TEST_MODEL.to_string())
+            .expect("Failed to load model");
+
+        assert_eq!(model.model_name(), TEST_MODEL);
+        assert_eq!(model.model_type(), "vLLM");
+    }
+
+    #[test]
+    #[ignore] // Requires vLLM server running at localhost:8000
+    fn test_endpoint_formatting() {
+        // Test that endpoint is properly formatted with /v1/embeddings
+        let model = VLLM::new("http://localhost:8000".to_string(), TEST_MODEL.to_string())
+            .expect("Failed to load model");
+
+        // The endpoint should be formatted with /v1/embeddings suffix
+        assert_eq!(model.endpoint, "http://localhost:8000/v1/embeddings");
+    }
+
+    #[test]
+    #[ignore] // Requires vLLM server running at localhost:8000
+    fn test_invalid_endpoint() {
+        // Test with an invalid endpoint that doesn't exist
+        let result = VLLM::new("http://localhost:9999".to_string(), TEST_MODEL.to_string());
+
+        // Should fail because the endpoint doesn't exist
+        assert!(result.is_err(), "Should fail with invalid endpoint");
+    }
+
+    #[test]
+    #[ignore] // Requires vLLM server running at localhost:8000
+    fn test_consistency() {
+        // Test that the same input produces the same output
+        let model = VLLM::new(TEST_ENDPOINT.to_string(), TEST_MODEL.to_string())
+            .expect("Failed to load model");
+
+        let inputs = vec!["Consistency test sentence."];
+
+        let embeddings1 = model.embed(&inputs, ()).expect("First embed failed");
+        let embeddings2 = model.embed(&inputs, ()).expect("Second embed failed");
+
+        assert_eq!(embeddings1.len(), embeddings2.len());
+        assert_eq!(embeddings1[0].len(), embeddings2[0].len());
+
+        // Embeddings should be identical (or very close due to floating point)
+        let max_diff = embeddings1[0]
+            .iter()
+            .zip(embeddings2[0].iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, |max, diff| max.max(diff));
+
+        assert!(
+            max_diff < 1e-6,
+            "Embeddings should be consistent. Max difference: {}",
+            max_diff
+        );
     }
 }

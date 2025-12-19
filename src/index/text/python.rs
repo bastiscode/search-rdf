@@ -61,7 +61,7 @@ pub struct KeywordIndex {
 impl KeywordIndex {
     #[staticmethod]
     pub fn build(data: &TextData, index_dir: &str) -> Result<()> {
-        RustKeywordIndex::build(&data.inner, index_dir.as_ref(), ())
+        RustKeywordIndex::build(&data.inner, index_dir.as_ref(), &())
     }
 
     #[staticmethod]
@@ -86,9 +86,9 @@ impl KeywordIndex {
 
         if let Some(ids) = allow_ids {
             self.inner
-                .search_with_filter(query, params, move |id| ids.contains(&id))
+                .search_with_filter(query, &params, move |id| ids.contains(&id))
         } else {
-            self.inner.search(query, params)
+            self.inner.search(query, &params)
         }
     }
 }
@@ -116,7 +116,7 @@ impl TextEmbeddingIndex {
         if let Some(metric) = metric {
             params = params.with_metric(metric);
         };
-        RustTextEmbeddingIndex::build(&data.inner, index_dir.as_ref(), params)
+        RustTextEmbeddingIndex::build(&data.inner, index_dir.as_ref(), &params)
     }
 
     #[staticmethod]
@@ -143,9 +143,9 @@ impl TextEmbeddingIndex {
 
         if let Some(ids) = allow_ids {
             self.inner
-                .search_with_filter(query, params, move |id| ids.contains(&id))
+                .search_with_filter(query, &params, move |id| ids.contains(&id))
         } else {
-            self.inner.search(query, params)
+            self.inner.search(query, &params)
         }
     }
 }
