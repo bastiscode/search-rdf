@@ -14,12 +14,14 @@ use crate::search_rdf::config::{Config, TextDataSource, TextSource};
 pub fn run(config_path: &str, force: bool) -> Result<()> {
     let config = Config::load(config_path)?;
 
-    println!(
-        "Building text data from {} sources...",
-        config.data.text.len()
-    );
+    let Some(data) = config.data else {
+        println!("No data sources defined in configuration.");
+        return Ok(());
+    };
 
-    for source in &config.data.text {
+    println!("Building text data from {} sources...", data.text.len());
+
+    for source in &data.text {
         if source.output.exists() && !force {
             println!(
                 "  [SKIP] {} (output exists, use --force to rebuild)",

@@ -1,21 +1,25 @@
 use anyhow::{Context, Result, anyhow};
 use axum::{
+    Router,
     extract::{Json, Path as AxumPath, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 
-use search_rdf::data::embedding::Embeddings;
-use search_rdf::data::text::{TextData, TextEmbeddings};
+use search_rdf::data::{
+    DataSource,
+    text::{TextData, TextEmbeddings},
+};
 use search_rdf::index::text::{KeywordIndex, TextEmbeddingIndex};
 use search_rdf::index::{EmbeddingIndex, Match, SearchIndex, SearchParams};
+use search_rdf::{data::embedding::Embeddings, index::text::embedding::Query};
 
 use crate::search_rdf::config::Config;
 
@@ -25,25 +29,37 @@ struct AppState {
 }
 
 enum LoadedIndex {
-    Keyword {
-        index: KeywordIndex,
-    },
-    TextEmbedding {
-        index: TextEmbeddingIndex,
-    },
-    Embedding {
-        index: EmbeddingIndex,
-    },
+    Keyword { index: KeywordIndex },
+    TextEmbedding { index: TextEmbeddingIndex },
+    Embedding { index: EmbeddingIndex },
+}
+
+impl LoadedIndex {
+    fn index_type(&self) -> &'static str {
+        match self {
+            LoadedIndex::Keyword { index } => index.index_type(),
+            LoadedIndex::TextEmbedding { index } => index.index_type(),
+            LoadedIndex::Embedding { index } => index.index_type(),
+        }
+    }
 }
 
 pub async fn run(config_path: &str) -> Result<()> {
     let config = Config::load(config_path)?;
 
+    let Some(server) = config.server else {
+        println!("No server configuration found.");
+        return Ok(());
+    };
+
     println!("Loading indices...");
     let mut indices = HashMap::new();
 
-    for server_index in &config.server.indices {
-        println!("  Loading {} ({})...", server_index.name, server_index.index_type);
+    for server_index in &server.indices {
+        println!(
+            "  Loading {} ({})...",
+            server_index.name, server_index.index_type
+        );
 
         let index = load_index(&server_index.index_type, &server_index.path)?;
         indices.insert(server_index.name.clone(), index);
@@ -63,7 +79,7 @@ pub async fn run(config_path: &str) -> Result<()> {
         .with_state(state);
 
     // Add CORS if enabled
-    if config.server.cors {
+    if server.cors {
         let cors = CorsLayer::new()
             .allow_origin(Any)
             .allow_methods(Any)
@@ -71,35 +87,32 @@ pub async fn run(config_path: &str) -> Result<()> {
         app = app.layer(cors);
     }
 
-    let addr = format!("{}:{}", config.server.host, config.server.port);
+    let addr = format!("{}:{}", server.host, server.port);
     println!("\nServing on http://{}", addr);
     println!("Available endpoints:");
     println!("  GET  /health");
     println!("  GET  /indices");
     println!("  POST /search/:index");
 
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let listener = TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
 }
 
-fn load_index(index_type: &str, path: &str) -> Result<LoadedIndex> {
-    let index_path = Path::new(path);
-
+fn load_index(index_type: &str, path: &Path) -> Result<LoadedIndex> {
     match index_type.to_lowercase().as_str() {
         "keyword" => {
             let text_data = TextData::load(
-                index_path
-                    .parent()
+                path.parent()
                     .and_then(|p| p.parent())
                     .ok_or_else(|| anyhow!("Invalid index path structure"))?,
             )?;
-            let index = KeywordIndex::load(text_data, index_path)?;
+            let index = KeywordIndex::load(text_data, path)?;
             Ok(LoadedIndex::Keyword { index })
         }
         "text_embedding" | "text-embedding" => {
-            let base_path = index_path
+            let base_path = path
                 .parent()
                 .and_then(|p| p.parent())
                 .ok_or_else(|| anyhow!("Invalid index path structure"))?;
@@ -110,7 +123,7 @@ fn load_index(index_type: &str, path: &str) -> Result<LoadedIndex> {
             Ok(LoadedIndex::TextEmbedding { index })
         }
         "embedding" => {
-            let base_path = index_path
+            let base_path = path
                 .parent()
                 .and_then(|p| p.parent())
                 .ok_or_else(|| anyhow!("Invalid index path structure"))?;
@@ -142,9 +155,9 @@ async fn list_indices(State(state): State<AppState>) -> Json<Vec<IndexInfo>> {
         .map(|(name, index)| IndexInfo {
             name: name.clone(),
             index_type: match index {
-                LoadedIndex::Keyword { .. } => "keyword".to_string(),
-                LoadedIndex::TextEmbedding { .. } => "text_embedding".to_string(),
-                LoadedIndex::Embedding { .. } => "embedding".to_string(),
+                LoadedIndex::Keyword { index } => index.index_type(),
+                LoadedIndex::TextEmbedding { index } => index.index_type(),
+                LoadedIndex::Embedding { index } => index.index_type(),
             },
         })
         .collect();
@@ -199,14 +212,15 @@ async fn search(
         .get(&index_name)
         .ok_or_else(|| anyhow!("Index not found: {}", index_name))?;
 
-    let params = SearchParams::default()
-        .with_k(req.k)
-        .with_min_score(req.min_score)
-        .with_exact(req.exact);
+    let mut params = SearchParams::default().with_k(req.k).with_exact(req.exact);
+
+    if let Some(min_score) = req.min_score {
+        params = params.with_min_score(min_score);
+    }
 
     let matches = match (index, &req.query) {
         (LoadedIndex::Keyword { index }, QueryType::Text { text }) => {
-            index.search(text.as_str(), params)?
+            index.search(text.as_str(), &params)?
         }
         (LoadedIndex::TextEmbedding { index }, QueryType::Text { text }) => {
             // For text embedding index with text query, we'd need to embed the text first
@@ -217,10 +231,10 @@ async fn search(
             .into());
         }
         (LoadedIndex::TextEmbedding { index }, QueryType::Embedding { embedding }) => {
-            index.search(embedding.as_slice(), params)?
+            index.search(Query::Embedding(embedding), &params)?
         }
         (LoadedIndex::Embedding { index }, QueryType::Embedding { embedding }) => {
-            index.search(embedding.as_slice(), params)?
+            index.search(embedding.as_slice(), &params)?
         }
         _ => {
             return Err(anyhow!("Query type doesn't match index type").into());
@@ -231,7 +245,7 @@ async fn search(
     let response_matches = matches
         .into_iter()
         .map(|m| match m {
-            Match::Simple(id, score) => SearchMatch {
+            Match::Regular(id, score) => SearchMatch {
                 id,
                 field: None,
                 score,
@@ -243,9 +257,11 @@ async fn search(
                     LoadedIndex::Keyword { index } => {
                         index.data().field(id, field).map(|s| s.to_string())
                     }
-                    LoadedIndex::TextEmbedding { index } => {
-                        index.text_data().field(id, field).map(|s| s.to_string())
-                    }
+                    LoadedIndex::TextEmbedding { index } => index
+                        .data()
+                        .text_data()
+                        .field(id, field)
+                        .map(|s| s.to_string()),
                     LoadedIndex::Embedding { .. } => None,
                 };
 

@@ -12,15 +12,19 @@ use crate::search_rdf::config::{Config, IndexConfig, IndexType};
 pub fn run(config_path: &str, force: bool, only: Option<Vec<String>>) -> Result<()> {
     let config = Config::load(config_path)?;
 
+    let Some(indices) = config.indices else {
+        println!("No index configuration found.");
+        return Ok(());
+    };
+
     // Filter indices if --only is specified
     let indices: Vec<_> = if let Some(only_names) = only {
-        config
-            .indices
-            .iter()
+        indices
+            .into_iter()
             .filter(|idx| only_names.contains(&idx.name))
             .collect()
     } else {
-        config.indices.iter().collect()
+        indices
     };
 
     println!("Building {} indices...", indices.len());

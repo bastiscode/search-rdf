@@ -13,6 +13,11 @@ use crate::search_rdf::config::{Config, ModelConfig, ModelType};
 pub fn run(config_path: &str, force: bool, only: Option<Vec<String>>) -> Result<()> {
     let config = Config::load(config_path)?;
 
+    let Some(embed) = config.embeddings else {
+        println!("No embedding configuration found.");
+        return Ok(());
+    };
+
     // Load models
     let mut models: HashMap<String, Box<dyn EmbeddingModel<Input = str, Params = _>>> =
         HashMap::new();

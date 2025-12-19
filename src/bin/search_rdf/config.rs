@@ -10,13 +10,13 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     #[serde(default)]
-    pub data: DataConfig,
+    pub data: Option<DataConfig>,
     #[serde(default)]
-    pub embeddings: EmbeddingsConfig,
+    pub embeddings: Option<EmbeddingsConfig>,
     #[serde(default)]
-    pub indices: Vec<IndexConfig>,
+    pub indices: Option<Vec<IndexConfig>>,
     #[serde(default)]
-    pub server: ServerConfig,
+    pub server: Option<ServerConfig>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -140,6 +140,8 @@ pub struct ServerConfig {
     pub indices: Vec<ServerIndex>,
     #[serde(default)]
     pub models: Vec<ModelConfig>,
+    #[serde(default)]
+    pub cors: bool,
 }
 
 fn default_host() -> String {
