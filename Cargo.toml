@@ -38,6 +38,8 @@ clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 axum = "0.7"
 tower-http = { version = "0.6", features = ["cors"] }
+num_cpus = "1.17"
+futures = "0.3"
 
 [dev-dependencies]
 tempfile = "3.6"

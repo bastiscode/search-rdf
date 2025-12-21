@@ -83,8 +83,25 @@ impl SearchParams {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum SearchIndex {
+    Keyword(KeywordIndex),
+    TextEmbedding(TextEmbeddingIndex),
+    Embedding(EmbeddingIndex),
+}
+
+impl SearchIndex {
+    pub fn index_type(&self) -> &'static str {
+        match self {
+            SearchIndex::Keyword(idx) => idx.index_type(),
+            SearchIndex::TextEmbedding(idx) => idx.index_type(),
+            SearchIndex::Embedding(idx) => idx.index_type(),
+        }
+    }
+}
+
 /// Core trait for all search indices
-pub trait SearchIndex: Send + Sync {
+pub trait Search: Send + Sync {
     /// The data type this index operates on
     type Data: DataSource;
     /// The query type this index expects

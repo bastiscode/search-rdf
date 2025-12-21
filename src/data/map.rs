@@ -5,6 +5,7 @@ use std::{ops::Range, path::Path};
 
 use crate::utils::{load_bincode, write_bincode};
 
+#[derive(Debug)]
 pub struct TrieMap {
     trie: AdaptiveRadixTrie<u32>,
 }

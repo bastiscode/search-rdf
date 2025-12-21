@@ -5,12 +5,13 @@ use anyhow::{Result, anyhow};
 use std::path::Path;
 use std::sync::Arc;
 
+#[derive(Debug)]
 struct Inner {
     data: TextData,
     tensors: Tensors,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct TextEmbeddings {
     inner: Arc<Inner>,
 }

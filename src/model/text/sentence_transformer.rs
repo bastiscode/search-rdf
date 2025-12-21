@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use pyo3::{
     prelude::*,
@@ -6,14 +8,20 @@ use pyo3::{
 
 use crate::{
     data::embedding::Embedding,
-    model::{EmbeddingModel, EmbeddingParams},
+    model::{Embed, EmbeddingParams},
 };
 
-pub struct SentenceTransformer {
+#[derive(Debug)]
+struct Inner {
     model: Py<PyAny>,
     name: String,
     batch_size: usize,
     show_progress: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SentenceTransformer {
+    inner: Arc<Inner>,
 }
 
 impl SentenceTransformer {
@@ -34,15 +42,17 @@ impl SentenceTransformer {
             Ok(model_instance.into())
         })?;
         Ok(Self {
-            model,
-            name: name.to_string(),
-            batch_size,
-            show_progress,
+            inner: Arc::new(Inner {
+                model,
+                name: name.to_string(),
+                batch_size,
+                show_progress,
+            }),
         })
     }
 }
 
-impl EmbeddingModel for SentenceTransformer {
+impl Embed for SentenceTransformer {
     type Input = str;
     type Params = EmbeddingParams;
 
@@ -51,13 +61,13 @@ impl EmbeddingModel for SentenceTransformer {
         I: AsRef<Self::Input>,
     {
         Python::attach(|py| {
-            let model = self.model.bind(py);
+            let model = self.inner.model.bind(py);
             let inputs = PyList::new(py, inputs.iter().map(|s| s.as_ref()))?;
             let kwargs = PyDict::new(py);
-            kwargs.set_item("batch_size", self.batch_size)?;
+            kwargs.set_item("batch_size", self.inner.batch_size)?;
             kwargs.set_item("embedding_dim", params.num_dimensions)?;
             kwargs.set_item("normalize", params.normalize)?;
-            kwargs.set_item("show_progress", self.show_progress)?;
+            kwargs.set_item("show_progress", self.inner.show_progress)?;
 
             let embeddings = model.call_method("embed", (inputs,), Some(&kwargs))?;
             Ok(embeddings.extract()?)
@@ -66,7 +76,7 @@ impl EmbeddingModel for SentenceTransformer {
 
     fn num_dimensions(&self) -> usize {
         Python::attach(|py| {
-            let model = self.model.bind(py);
+            let model = self.inner.model.bind(py);
             model
                 .getattr("dim")
                 .expect("Failed to get model dim attribute")
@@ -76,11 +86,11 @@ impl EmbeddingModel for SentenceTransformer {
     }
 
     fn model_name(&self) -> &str {
-        &self.name
+        &self.inner.name
     }
 
     fn model_type(&self) -> &str {
-        "SentenceTransformer"
+        "sentence-transformer"
     }
 }
 

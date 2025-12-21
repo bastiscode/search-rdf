@@ -11,7 +11,7 @@ use search_rdf::{
         DataSource, TextData,
         map::{OrderedDataMap, TrieMap},
     },
-    index::{SearchIndex, SearchParams, keyword::KeywordIndex},
+    index::{Search, SearchParams, keyword::KeywordIndex},
 };
 
 fn convert_tsv_to_binary(tsv_file: &Path, data_dir: &Path) -> std::io::Result<()> {

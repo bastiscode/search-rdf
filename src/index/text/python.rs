@@ -4,7 +4,7 @@ use crate::data::Precision;
 use crate::data::embedding::Embedding;
 use crate::data::text::python::{TextData, TextEmbeddings};
 use crate::index::Match;
-use crate::index::SearchIndex;
+use crate::index::Search;
 use crate::index::SearchParams;
 use crate::index::embedding::{EmbeddingIndexParams, Metric};
 use crate::index::text::embedding::{Query, TextEmbeddingIndex as RustTextEmbeddingIndex};

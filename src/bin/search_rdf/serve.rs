@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use axum::{
     Router,
     extract::{Json, Path as AxumPath, State},
@@ -6,40 +6,29 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use futures::future::try_join_all;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 
-use search_rdf::data::{
-    DataSource,
-    text::{TextData, TextEmbeddings},
-};
-use search_rdf::index::text::{KeywordIndex, TextEmbeddingIndex};
-use search_rdf::index::{EmbeddingIndex, Match, SearchIndex, SearchParams};
-use search_rdf::{data::embedding::Embeddings, index::text::embedding::Query};
+use crate::search_rdf::index::load_index;
+use search_rdf::index::SearchIndex;
+use search_rdf::index::text::embedding::Query;
+use search_rdf::index::{Match, Search, SearchParams};
 
 use crate::search_rdf::config::Config;
 
 #[derive(Clone)]
 struct AppState {
-    indices: Arc<HashMap<String, LoadedIndex>>,
+    indices: Arc<HashMap<String, SearchIndex>>,
 }
 
-enum LoadedIndex {
-    Keyword { index: KeywordIndex },
-    TextEmbedding { index: TextEmbeddingIndex },
-    Embedding { index: EmbeddingIndex },
-}
-
-impl LoadedIndex {
-    fn index_type(&self) -> &'static str {
-        match self {
-            LoadedIndex::Keyword { index } => index.index_type(),
-            LoadedIndex::TextEmbedding { index } => index.index_type(),
-            LoadedIndex::Embedding { index } => index.index_type(),
+impl AppState {
+    fn new(indices: HashMap<String, SearchIndex>) -> Self {
+        Self {
+            indices: Arc::new(indices),
         }
     }
 }
@@ -52,24 +41,29 @@ pub async fn run(config_path: &str) -> Result<()> {
         return Ok(());
     };
 
+    let Some(indices) = config.indices else {
+        println!("No index configuration found.");
+        return Ok(());
+    };
+
     println!("Loading indices...");
-    let mut indices = HashMap::new();
+    let mut search_indices = HashMap::new();
 
-    for server_index in &server.indices {
-        println!(
-            "  Loading {} ({})...",
-            server_index.name, server_index.index_type
-        );
+    for name in server.indices {
+        println!("  Loading {}...", name);
 
-        let index = load_index(&server_index.index_type, &server_index.path)?;
-        indices.insert(server_index.name.clone(), index);
+        let index_config = indices
+            .iter()
+            .find(|&index| index.name == name)
+            .ok_or_else(|| anyhow!("Index configuration not found for {}", name))?;
 
-        println!("  [OK] {}", server_index.name);
+        let search_index = load_index(&index_config.index_type, &index_config.output)?;
+        println!("  [OK] {}", name);
+
+        search_indices.insert(name, search_index);
     }
 
-    let state = AppState {
-        indices: Arc::new(indices),
-    };
+    let state = AppState::new(search_indices);
 
     // Build router
     let mut app = Router::new()
@@ -100,42 +94,6 @@ pub async fn run(config_path: &str) -> Result<()> {
     Ok(())
 }
 
-fn load_index(index_type: &str, path: &Path) -> Result<LoadedIndex> {
-    match index_type.to_lowercase().as_str() {
-        "keyword" => {
-            let text_data = TextData::load(
-                path.parent()
-                    .and_then(|p| p.parent())
-                    .ok_or_else(|| anyhow!("Invalid index path structure"))?,
-            )?;
-            let index = KeywordIndex::load(text_data, path)?;
-            Ok(LoadedIndex::Keyword { index })
-        }
-        "text_embedding" | "text-embedding" => {
-            let base_path = path
-                .parent()
-                .and_then(|p| p.parent())
-                .ok_or_else(|| anyhow!("Invalid index path structure"))?;
-
-            let text_embeddings = TextEmbeddings::load(base_path, base_path)?;
-
-            let index = TextEmbeddingIndex::load(text_embeddings, index_path)?;
-            Ok(LoadedIndex::TextEmbedding { index })
-        }
-        "embedding" => {
-            let base_path = path
-                .parent()
-                .and_then(|p| p.parent())
-                .ok_or_else(|| anyhow!("Invalid index path structure"))?;
-
-            let embeddings = Embeddings::load(base_path)?;
-            let index = EmbeddingIndex::load(embeddings, index_path)?;
-            Ok(LoadedIndex::Embedding { index })
-        }
-        _ => Err(anyhow!("Unknown index type: {}", index_type)),
-    }
-}
-
 // Health check endpoint
 async fn health() -> &'static str {
     "OK"
@@ -154,11 +112,7 @@ async fn list_indices(State(state): State<AppState>) -> Json<Vec<IndexInfo>> {
         .iter()
         .map(|(name, index)| IndexInfo {
             name: name.clone(),
-            index_type: match index {
-                LoadedIndex::Keyword { index } => index.index_type(),
-                LoadedIndex::TextEmbedding { index } => index.index_type(),
-                LoadedIndex::Embedding { index } => index.index_type(),
-            },
+            index_type: index.index_type().to_string(),
         })
         .collect();
 
@@ -179,8 +133,17 @@ struct SearchRequest {
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum QueryType {
-    Text { text: String },
-    Embedding { embedding: Vec<f32> },
+    Text(Vec<String>),
+    Embedding(Vec<Vec<f32>>),
+}
+
+impl QueryType {
+    fn type_name(&self) -> &'static str {
+        match self {
+            QueryType::Text(..) => "text",
+            QueryType::Embedding(..) => "embedding",
+        }
+    }
 }
 
 fn default_k() -> usize {
@@ -188,18 +151,44 @@ fn default_k() -> usize {
 }
 
 #[derive(Serialize)]
-struct SearchResponse {
-    matches: Vec<SearchMatch>,
+struct SearchMatch {
+    id: u32,
+    score: f32,
+}
+
+impl SearchMatch {
+    fn new(id: u32, score: f32) -> Self {
+        Self { id, score }
+    }
+}
+
+impl From<Match> for SearchMatch {
+    fn from(m: Match) -> Self {
+        SearchMatch::new(m.id(), m.score())
+    }
 }
 
 #[derive(Serialize)]
-struct SearchMatch {
-    id: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    field: Option<usize>,
-    score: f32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    text: Option<String>,
+struct SearchResponse {
+    matches: Vec<Vec<SearchMatch>>,
+}
+
+async fn search_parallel<I: Send + Sync + 'static>(
+    inputs: Vec<I>,
+    search_fn: impl Fn(I) -> Result<Vec<Match>> + Send + Clone + 'static,
+) -> Result<Vec<Vec<SearchMatch>>> {
+    let handles: Vec<_> = inputs
+        .into_iter()
+        .map(|input| {
+            let f = search_fn.clone();
+            tokio::task::spawn_blocking(move || {
+                f(input).map(|res| res.into_iter().map(|m| m.into()).collect())
+            })
+        })
+        .collect();
+
+    let results = try_join_all(handles).await?;
+    results.into_iter().collect()
 }
 
 async fn search(
@@ -207,10 +196,12 @@ async fn search(
     State(state): State<AppState>,
     Json(req): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, AppError> {
-    let index = state
-        .indices
-        .get(&index_name)
-        .ok_or_else(|| anyhow!("Index not found: {}", index_name))?;
+    let index = state.indices.get(&index_name).cloned().ok_or_else(|| {
+        AppError(
+            StatusCode::BAD_REQUEST,
+            anyhow!("Index not found: {}", index_name),
+        )
+    })?;
 
     let mut params = SearchParams::default().with_k(req.k).with_exact(req.exact);
 
@@ -218,86 +209,55 @@ async fn search(
         params = params.with_min_score(min_score);
     }
 
-    let matches = match (index, &req.query) {
-        (LoadedIndex::Keyword { index }, QueryType::Text { text }) => {
-            index.search(text.as_str(), &params)?
+    let matches = match (index, req.query) {
+        (SearchIndex::Keyword(index), QueryType::Text(text)) => {
+            search_parallel(text, move |text| index.search(text.as_str(), &params)).await?
         }
-        (LoadedIndex::TextEmbedding { index }, QueryType::Text { text }) => {
+        (SearchIndex::TextEmbedding(..), QueryType::Text(..)) => {
             // For text embedding index with text query, we'd need to embed the text first
             // This requires having an embedding model available
-            return Err(anyhow!(
-                "Text queries for text_embedding indices require embedding model (not yet implemented)"
-            )
-            .into());
+            return Err(AppError(
+                StatusCode::BAD_REQUEST,
+                anyhow!(
+                    "Text queries for text_embedding indices require embedding model (not yet implemented)"
+                ),
+            ));
         }
-        (LoadedIndex::TextEmbedding { index }, QueryType::Embedding { embedding }) => {
-            index.search(Query::Embedding(embedding), &params)?
+        (SearchIndex::TextEmbedding(index), QueryType::Embedding(embedding)) => {
+            search_parallel(embedding, move |emb| {
+                index.search(Query::Embedding(&emb), &params)
+            })
+            .await?
         }
-        (LoadedIndex::Embedding { index }, QueryType::Embedding { embedding }) => {
-            index.search(embedding.as_slice(), &params)?
+        (SearchIndex::Embedding(index), QueryType::Embedding(embedding)) => {
+            search_parallel(embedding, move |emb| index.search(&emb, &params)).await?
         }
-        _ => {
-            return Err(anyhow!("Query type doesn't match index type").into());
+        (index, query) => {
+            return Err(AppError(
+                StatusCode::BAD_REQUEST,
+                anyhow!(
+                    "Query type {} doesn't match index type {}",
+                    query.type_name(),
+                    index.index_type()
+                ),
+            ));
         }
     };
 
-    // Convert matches to response format and optionally fetch text
-    let response_matches = matches
-        .into_iter()
-        .map(|m| match m {
-            Match::Regular(id, score) => SearchMatch {
-                id,
-                field: None,
-                score,
-                text: None,
-            },
-            Match::WithField(id, field, score) => {
-                // Try to fetch text if it's a text-based index
-                let text = match index {
-                    LoadedIndex::Keyword { index } => {
-                        index.data().field(id, field).map(|s| s.to_string())
-                    }
-                    LoadedIndex::TextEmbedding { index } => index
-                        .data()
-                        .text_data()
-                        .field(id, field)
-                        .map(|s| s.to_string()),
-                    LoadedIndex::Embedding { .. } => None,
-                };
-
-                SearchMatch {
-                    id,
-                    field: Some(field),
-                    score,
-                    text,
-                }
-            }
-        })
-        .collect();
-
-    Ok(Json(SearchResponse {
-        matches: response_matches,
-    }))
+    Ok(Json(SearchResponse { matches }))
 }
 
 // Error handling
-struct AppError(anyhow::Error);
+struct AppError(StatusCode, anyhow::Error);
 
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error: {}", self.0),
-        )
-            .into_response()
+impl From<anyhow::Error> for AppError {
+    fn from(err: anyhow::Error) -> Self {
+        AppError(StatusCode::INTERNAL_SERVER_ERROR, err)
     }
 }
 
-impl<E> From<E> for AppError
-where
-    E: Into<anyhow::Error>,
-{
-    fn from(err: E) -> Self {
-        Self(err.into())
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        (self.0, format!("Error: {}", self.1)).into_response()
     }
 }

@@ -1,12 +1,20 @@
-use crate::model::{EmbeddingModel, EmbeddingParams};
+use std::sync::Arc;
+
+use crate::model::{Embed, EmbeddingParams};
 use anyhow::{Result, anyhow};
 use ureq::Agent;
 
-pub struct VLLM {
-    pub endpoint: String,
-    pub model_name: String,
+#[derive(Debug)]
+struct Inner {
+    endpoint: String,
+    model_name: String,
     num_dimensions: usize,
     agent: Agent,
+}
+
+#[derive(Debug, Clone)]
+pub struct VLLM {
+    inner: Arc<Inner>,
 }
 
 fn embedding_from_value(value: &serde_json::Value, params: &EmbeddingParams) -> Result<Vec<f32>> {
@@ -58,7 +66,7 @@ fn embed(
 }
 
 impl VLLM {
-    pub fn new(endpoint: String, model_name: String) -> Result<Self> {
+    pub fn new(endpoint: &str, model_name: &str) -> Result<Self> {
         let agent = Agent::new_with_defaults();
         let endpoint = format!("{}/v1/embeddings", endpoint);
 
@@ -72,15 +80,17 @@ impl VLLM {
         let num_dimensions = embeddings[0].len();
 
         Ok(Self {
-            endpoint,
-            model_name,
-            agent,
-            num_dimensions,
+            inner: Arc::new(Inner {
+                endpoint,
+                model_name: model_name.to_string(),
+                agent,
+                num_dimensions,
+            }),
         })
     }
 }
 
-impl EmbeddingModel for VLLM {
+impl Embed for VLLM {
     type Input = str;
     type Params = EmbeddingParams;
 
@@ -88,19 +98,19 @@ impl EmbeddingModel for VLLM {
     where
         I: AsRef<Self::Input>,
     {
-        embed(&self.agent, &self.endpoint, inputs, params)
+        embed(&self.inner.agent, &self.inner.endpoint, inputs, params)
     }
 
     fn num_dimensions(&self) -> usize {
-        self.num_dimensions
+        self.inner.num_dimensions
     }
 
     fn model_name(&self) -> &str {
-        &self.model_name
+        &self.inner.model_name
     }
 
     fn model_type(&self) -> &str {
-        "vLLM"
+        "vllm"
     }
 }
 

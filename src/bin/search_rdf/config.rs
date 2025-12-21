@@ -10,31 +10,36 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     #[serde(default)]
-    pub data: Option<DataConfig>,
+    pub datasets: Option<Vec<DataConfig>>,
     #[serde(default)]
-    pub embeddings: Option<EmbeddingsConfig>,
+    pub models: Option<Vec<ModelConfig>>,
+    #[serde(default)]
+    pub embeddings: Option<Vec<EmbeddingConfig>>,
     #[serde(default)]
     pub indices: Option<Vec<IndexConfig>>,
     #[serde(default)]
     pub server: Option<ServerConfig>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub struct DataConfig {
-    #[serde(default)]
-    pub text: Vec<TextDataSource>,
+    pub name: String,
+    pub output: PathBuf,
+    #[serde(flatten)]
+    pub data_type: DataType,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct TextDataSource {
-    pub name: String,
-    pub source: TextSource,
-    pub output: PathBuf,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DataType {
+    Text(TextSource),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TextSource {
+    #[serde(rename = "sparql-query")]
     SparqlQuery {
         endpoint: String,
         query: String,
@@ -50,14 +55,6 @@ pub enum TextSource {
     },
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct EmbeddingsConfig {
-    #[serde(default)]
-    pub models: Vec<ModelConfig>,
-    #[serde(default)]
-    pub datasets: Vec<TextEmbeddingDataset>,
-}
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ModelConfig {
     pub name: String,
@@ -66,13 +63,13 @@ pub struct ModelConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ModelType {
     Vllm {
         endpoint: String,
         model_name: String,
     },
-    #[serde(rename = "sentence_transformer")]
+    #[serde(rename = "sentence-transformer")]
     SentenceTransformer {
         model_name: String,
         #[serde(default = "default_device")]
@@ -97,12 +94,21 @@ fn default_batch_size() -> usize {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct TextEmbeddingDataset {
+pub struct EmbeddingConfig {
     pub name: String,
-    pub text_data: PathBuf,
-    pub model: String,
     pub output: PathBuf,
-    pub params: EmbeddingParams,
+    pub model: String,
+    #[serde(flatten)]
+    pub dataset: EmbeddingDatasetConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EmbeddingDatasetConfig {
+    Text {
+        dataset: PathBuf,
+        params: EmbeddingParams,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -119,6 +125,7 @@ pub enum IndexType {
     Keyword {
         text_data: PathBuf,
     },
+    #[serde(rename = "text-embedding")]
     TextEmbedding {
         text_data: PathBuf,
         embedding_data: PathBuf,
@@ -137,7 +144,8 @@ pub struct ServerConfig {
     #[serde(default = "default_port")]
     pub port: u16,
     #[serde(default)]
-    pub indices: Vec<ServerIndex>,
+    // References the names of the indices specified in the indexes section
+    pub indices: Vec<String>,
     #[serde(default)]
     pub models: Vec<ModelConfig>,
     #[serde(default)]
@@ -150,14 +158,6 @@ fn default_host() -> String {
 
 fn default_port() -> u16 {
     8080
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ServerIndex {
-    pub name: String,
-    pub path: String,
-    #[serde(rename = "type")]
-    pub index_type: String,
 }
 
 impl Config {

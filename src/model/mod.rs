@@ -1,10 +1,35 @@
-use crate::data::embedding::Embedding;
+use crate::{
+    data::embedding::Embedding,
+    model::text::{sentence_transformer::SentenceTransformer, vllm::VLLM},
+};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 pub mod text;
 
-pub trait EmbeddingModel {
+#[derive(Debug, Clone)]
+pub enum EmbeddingModel {
+    SentenceTransformer(SentenceTransformer),
+    Vllm(VLLM),
+}
+
+impl EmbeddingModel {
+    pub fn model_name(&self) -> &str {
+        match self {
+            EmbeddingModel::SentenceTransformer(m) => m.model_name(),
+            EmbeddingModel::Vllm(m) => m.model_name(),
+        }
+    }
+
+    pub fn model_type(&self) -> &str {
+        match self {
+            EmbeddingModel::SentenceTransformer(m) => m.model_type(),
+            EmbeddingModel::Vllm(m) => m.model_type(),
+        }
+    }
+}
+
+pub trait Embed {
     type Input: ?Sized;
     type Params;
 

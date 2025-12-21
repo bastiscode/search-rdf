@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use search_rdf::data::TextData;
 use search_rdf::data::text::item::TextItem;
 use search_rdf::data::text::item::jsonl::stream_text_items_from_jsonl_file;
@@ -8,43 +8,48 @@ use search_rdf::data::text::item::sparql::{
 };
 use std::collections::HashMap;
 use std::io::Read;
+use std::path::Path;
 
-use crate::search_rdf::config::{Config, TextDataSource, TextSource};
+use crate::search_rdf::config::{Config, DataType, TextSource};
 
 pub fn run(config_path: &str, force: bool) -> Result<()> {
     let config = Config::load(config_path)?;
 
-    let Some(data) = config.data else {
-        println!("No data sources defined in configuration.");
+    let Some(datasets) = config.datasets else {
+        println!("No datasets defined in configuration.");
         return Ok(());
     };
 
-    println!("Building text data from {} sources...", data.text.len());
+    println!("Building {} datasets...", datasets.len());
 
-    for source in &data.text {
-        if source.output.exists() && !force {
+    for dataset in &datasets {
+        if dataset.output.exists() && !force {
             println!(
                 "  [SKIP] {} (output exists, use --force to rebuild)",
-                source.name
+                dataset.name
             );
             continue;
         }
 
-        println!("  [BUILD] {}...", source.name);
-        build_text_data(source)?;
-        println!("  [OK] {} -> {}", source.name, source.output.display());
+        println!("  [BUILD] {}...", dataset.name);
+        match &dataset.data_type {
+            DataType::Text(source) => {
+                build_text_data(source, &dataset.output)?;
+            }
+        }
+
+        println!("  [OK] {} -> {}", dataset.name, dataset.output.display());
     }
 
-    println!("Done!");
     Ok(())
 }
 
-fn build_text_data(source: &TextDataSource) -> Result<()> {
+fn build_text_data(source: &TextSource, output: &Path) -> Result<()> {
     // Get iterator of TextItems based on source type
-    let items: Box<dyn Iterator<Item = Result<TextItem>>> = match &source.source {
+    let items: Box<dyn Iterator<Item = Result<TextItem>>> = match source {
         TextSource::Jsonl { path } => Box::new(stream_text_items_from_jsonl_file(path)?),
         TextSource::Sparql { path, format } => {
-            Box::new(stream_text_items_from_sparql_result_file(&path, *format)?)
+            Box::new(stream_text_items_from_sparql_result_file(path, *format)?)
         }
         TextSource::SparqlQuery {
             endpoint,
@@ -63,7 +68,7 @@ fn build_text_data(source: &TextDataSource) -> Result<()> {
     };
 
     // Build TextData
-    TextData::build(items, &source.output)?;
+    TextData::build(items, output)?;
 
     Ok(())
 }
@@ -86,16 +91,4 @@ pub fn execute_sparql_query(
 
     let response = request.send_json(serde_json::json!({ "query": query }))?;
     Ok(response.into_body().into_reader())
-}
-
-fn parse_sparql_format(format: &str) -> Result<SPARQLResultFormat> {
-    match format.to_lowercase().as_str() {
-        "json" => Ok(SPARQLResultFormat::JSON),
-        "xml" => Ok(SPARQLResultFormat::XML),
-        "tsv" => Ok(SPARQLResultFormat::TSV),
-        _ => Err(anyhow!(
-            "Unsupported SPARQL format: {}. Supported formats: json, xml, tsv",
-            format
-        )),
-    }
 }

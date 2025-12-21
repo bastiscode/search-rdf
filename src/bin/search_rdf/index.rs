@@ -5,26 +5,16 @@ use search_rdf::data::DataSource;
 use search_rdf::data::embedding::Embeddings;
 use search_rdf::data::text::{TextData, TextEmbeddings};
 use search_rdf::index::text::{KeywordIndex, TextEmbeddingIndex};
-use search_rdf::index::{EmbeddingIndex, EmbeddingIndexParams, SearchIndex};
+use search_rdf::index::{EmbeddingIndex, EmbeddingIndexParams, Search, SearchIndex};
 
-use crate::search_rdf::config::{Config, IndexConfig, IndexType};
+use crate::search_rdf::config::{Config, IndexType};
 
-pub fn run(config_path: &str, force: bool, only: Option<Vec<String>>) -> Result<()> {
+pub fn run(config_path: &str, force: bool) -> Result<()> {
     let config = Config::load(config_path)?;
 
     let Some(indices) = config.indices else {
         println!("No index configuration found.");
         return Ok(());
-    };
-
-    // Filter indices if --only is specified
-    let indices: Vec<_> = if let Some(only_names) = only {
-        indices
-            .into_iter()
-            .filter(|idx| only_names.contains(&idx.name))
-            .collect()
-    } else {
-        indices
     };
 
     println!("Building {} indices...", indices.len());
@@ -39,7 +29,7 @@ pub fn run(config_path: &str, force: bool, only: Option<Vec<String>>) -> Result<
         }
 
         println!("  [BUILD] {}...", index_config.name);
-        build_index(&index_config)?;
+        build_index(&index_config.index_type, &index_config.output)?;
         println!(
             "  [OK] {} -> {}",
             index_config.name,
@@ -47,13 +37,11 @@ pub fn run(config_path: &str, force: bool, only: Option<Vec<String>>) -> Result<
         );
     }
 
-    println!("Done!");
     Ok(())
 }
 
-fn build_index(index_config: &IndexConfig) -> Result<()> {
-    let output = &index_config.output;
-    match &index_config.index_type {
+fn build_index(index_type: &IndexType, output: &Path) -> Result<()> {
+    match index_type {
         IndexType::Keyword { text_data } => build_keyword_index(text_data, output),
         IndexType::TextEmbedding {
             text_data,
@@ -67,13 +55,42 @@ fn build_index(index_config: &IndexConfig) -> Result<()> {
     }
 }
 
+pub fn load_index(index_type: &IndexType, output: &Path) -> Result<SearchIndex> {
+    match index_type {
+        IndexType::Keyword { text_data } => {
+            let text_data = TextData::load(text_data)?;
+            let index = KeywordIndex::load(text_data, output)?;
+            Ok(SearchIndex::Keyword(index))
+        }
+        IndexType::TextEmbedding {
+            text_data,
+            embedding_data,
+            ..
+        } => {
+            let text_data = TextData::load(text_data)?;
+            let text_embeddings = TextEmbeddings::load(text_data, embedding_data)?;
+            let index = TextEmbeddingIndex::load(text_embeddings, output)?;
+            Ok(SearchIndex::TextEmbedding(index))
+        }
+        IndexType::Embedding { embedding_data, .. } => {
+            let embeddings = Embeddings::load(embedding_data)?;
+            let index = EmbeddingIndex::load(embeddings, output)?;
+            Ok(SearchIndex::Embedding(index))
+        }
+    }
+}
+
 fn build_keyword_index(text_data_path: &Path, output_path: &Path) -> Result<()> {
     let text_data = TextData::load(text_data_path).context(format!(
         "Failed to load text data from: {}",
         text_data_path.display()
     ))?;
 
-    println!("    Loaded {} text items", text_data.len());
+    println!(
+        "    Loaded {} text items with {} fields",
+        text_data.len(),
+        text_data.total_fields()
+    );
 
     KeywordIndex::build(&text_data, output_path, &())?;
 
@@ -91,11 +108,13 @@ fn build_text_embedding_index(
         .context("Failed to load text embeddings")?;
 
     println!(
-        "    Loaded {} text items",
-        text_embeddings.text_data().len()
+        "    Loaded {} text items with {} fields",
+        text_embeddings.text_data().len(),
+        text_embeddings.text_data().total_fields()
     );
     println!(
-        "    Loaded {} embeddings ({} dimensions)",
+        "    Loaded {} embeddings for {} items ({} dimensions)",
+        text_embeddings.total_fields(),
         text_embeddings.len(),
         text_embeddings.num_dimensions()
     );
@@ -116,12 +135,13 @@ fn build_embedding_index(
     ))?;
 
     println!(
-        "    Loaded {} embeddings ({} dimensions)",
+        "    Loaded {} embeddings for {} items ({} dimensions)",
+        embeddings.total_fields(),
         embeddings.len(),
         embeddings.num_dimensions()
     );
 
-    EmbeddingIndex::build(&embeddings, output_path, &params)?;
+    EmbeddingIndex::build(&embeddings, output_path, params)?;
 
     Ok(())
 }

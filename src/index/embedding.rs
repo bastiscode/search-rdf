@@ -5,7 +5,7 @@ use crate::{
         DataSource,
         embedding::{EmbeddingRef, Precision},
     },
-    index::{Match, SearchIndex},
+    index::{Match, Search},
 };
 use anyhow::{Result, anyhow};
 use ordered_float::OrderedFloat;
@@ -178,6 +178,17 @@ struct Inner {
     metadata: Metadata,
 }
 
+impl std::fmt::Debug for Inner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Inner")
+            .field("data", &self.data)
+            .field("index", &"Index { ... }")
+            .field("metadata", &self.metadata)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct EmbeddingIndex {
     inner: Arc<Inner>,
 }
@@ -298,7 +309,7 @@ pub fn binary_quantization(embedding: &[f32]) -> Result<Vec<u8>> {
     Ok(binary_emb)
 }
 
-impl SearchIndex for EmbeddingIndex {
+impl Search for EmbeddingIndex {
     type Data = Embeddings;
     type Query<'q> = EmbeddingRef<'q>;
     type BuildParams = EmbeddingIndexParams;
@@ -390,7 +401,7 @@ impl SearchIndex for EmbeddingIndex {
     }
 
     fn index_type(&self) -> &'static str {
-        "EmbeddingIndex"
+        "embedding"
     }
 
     fn search(&self, query: Self::Query<'_>, params: &SearchParams) -> Result<Vec<Match>> {

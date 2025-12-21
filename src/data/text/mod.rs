@@ -14,6 +14,7 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::Arc;
 
+#[derive(Debug)]
 struct Inner {
     data_map: OrderedDataMap,
     identifier_map: TrieMap,
@@ -21,7 +22,7 @@ struct Inner {
 }
 
 /// Text data source backed by a TSV file
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct TextData {
     inner: Arc<Inner>,
 }

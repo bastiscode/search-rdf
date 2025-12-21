@@ -1,6 +1,6 @@
 use crate::data::DataSource;
 use crate::data::text::TextData;
-use crate::index::{Match, SearchIndex, SearchParams};
+use crate::index::{Match, Search, SearchParams};
 use crate::utils::{load_u32_vec, load_usize_vec_from_u64};
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
@@ -222,6 +222,7 @@ impl Ord for Candidate {
 
 const U32_SIZE: usize = size_of::<u32>();
 
+#[derive(Debug)]
 struct Inner {
     data: TextData,
     keywords: Mmap,
@@ -232,7 +233,7 @@ struct Inner {
     field_to_data: Vec<u32>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct KeywordIndex {
     inner: Arc<Inner>,
 }
@@ -508,7 +509,7 @@ impl KeywordIndex {
     }
 }
 
-impl SearchIndex for KeywordIndex {
+impl Search for KeywordIndex {
     type Data = TextData;
     type Query<'q> = &'q str;
     type BuildParams = ();
@@ -598,7 +599,7 @@ impl SearchIndex for KeywordIndex {
     }
 
     fn index_type(&self) -> &'static str {
-        "KeywordIndex"
+        "keyword"
     }
 
     fn search(&self, query: Self::Query<'_>, params: &SearchParams) -> Result<Vec<Match>> {

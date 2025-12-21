@@ -14,7 +14,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Download and prepare text data
+    /// Download and prepare data
     Data {
         /// Path to configuration file
         config: String,
@@ -23,16 +23,13 @@ enum Commands {
         force: bool,
     },
 
-    /// Generate embeddings from text data
+    /// Generate embeddings for data
     Embed {
         /// Path to configuration file
         config: String,
         /// Force rebuild even if output exists
         #[arg(long)]
         force: bool,
-        /// Only process specific datasets (by name)
-        #[arg(long)]
-        only: Option<Vec<String>>,
     },
 
     /// Build search indices
@@ -42,9 +39,6 @@ enum Commands {
         /// Force rebuild even if output exists
         #[arg(long)]
         force: bool,
-        /// Only build specific indices (by name)
-        #[arg(long)]
-        only: Option<Vec<String>>,
     },
 
     /// Serve indices via HTTP
@@ -54,24 +48,21 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Data { config, force } => {
-            search_rdf::data::run(&config, force)?;
-        }
-        Commands::Embed { config, force, only } => {
-            search_rdf::embed::run(&config, force, only)?;
-        }
-        Commands::Index { config, force, only } => {
-            search_rdf::index::run(&config, force, only)?;
-        }
+        Commands::Data { config, force } => search_rdf::data::run(&config, force),
+        Commands::Embed { config, force } => search_rdf::embed::run(&config, force),
+        Commands::Index { config, force } => search_rdf::index::run(&config, force),
         Commands::Serve { config } => {
-            search_rdf::serve::run(&config).await?;
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(num_cpus::get())
+                .max_blocking_threads(num_cpus::get() * 4)
+                .enable_all()
+                .build()?;
+
+            runtime.block_on(async { search_rdf::serve::run(&config).await })
         }
     }
-
-    Ok(())
 }

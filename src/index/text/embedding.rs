@@ -2,7 +2,7 @@ use crate::data::embedding::EmbeddingRef;
 use crate::data::text::embedding::TextEmbeddings;
 use crate::data::{DataSource, Precision};
 use crate::index::embedding::{Metadata, binary_quantization};
-use crate::index::{EmbeddingIndexParams, Match, SearchIndex, SearchParams};
+use crate::index::{EmbeddingIndexParams, Match, Search, SearchParams};
 use crate::utils::load_u32_vec;
 use crate::utils::{load_json, write_json};
 use anyhow::{Result, anyhow};
@@ -22,6 +22,18 @@ struct Inner {
     metadata: Metadata,
 }
 
+impl std::fmt::Debug for Inner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Inner")
+            .field("data", &self.data)
+            .field("index", &"Index { ... }")
+            .field("field_to_data", &self.field_to_data)
+            .field("metadata", &self.metadata)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct TextEmbeddingIndex {
     inner: Arc<Inner>,
 }
@@ -159,7 +171,7 @@ pub enum Query<'e> {
     Embedding(EmbeddingRef<'e>),
 }
 
-impl SearchIndex for TextEmbeddingIndex {
+impl Search for TextEmbeddingIndex {
     type Data = TextEmbeddings;
     type Query<'q> = Query<'q>;
     type BuildParams = EmbeddingIndexParams;
@@ -258,7 +270,7 @@ impl SearchIndex for TextEmbeddingIndex {
     }
 
     fn index_type(&self) -> &'static str {
-        "TextEmbeddingIndex"
+        "text-embedding"
     }
 
     fn search(&self, query: Self::Query<'_>, params: &SearchParams) -> Result<Vec<Match>> {
