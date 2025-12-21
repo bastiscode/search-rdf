@@ -20,10 +20,12 @@ use usearch::ffi::MetricKind;
 use usearch::{Index, b1x8};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "lowercase")]
 pub enum Metric {
+    #[serde(rename = "cosine-normalized")]
     CosineNormalized,
     Cosine,
+    #[serde(rename = "inner-product")]
     InnerProduct,
     L2,
     Hamming,
@@ -530,7 +532,7 @@ mod embedding_index_tests {
                     .with_metric(*metric)
                     .with_precision(*precision);
 
-                EmbeddingIndex::build(&data, &index_dir, params).expect("Failed to build index");
+                EmbeddingIndex::build(&data, &index_dir, &params).expect("Failed to build index");
                 let index =
                     EmbeddingIndex::load(data.clone(), &index_dir).expect("Failed to load index");
 
@@ -538,7 +540,7 @@ mod embedding_index_tests {
                 normalize(&mut query);
 
                 let results = index
-                    .search(&query, SearchParams::default())
+                    .search(&query, &SearchParams::default())
                     .expect("Failed to search");
 
                 // Should find ID 100 as top result (deduped from two embeddings)
@@ -593,7 +595,7 @@ mod embedding_index_tests {
 
                 // Test search with filter - exclude ID 100
                 let results_filtered = index
-                    .search_with_filter(&query, SearchParams::default(), |id| id != 100)
+                    .search_with_filter(&query, &SearchParams::default(), |id| id != 100)
                     .expect("Failed to search with filter");
 
                 // Should find ID 200 or 300, but not 100
@@ -640,14 +642,14 @@ mod embedding_index_tests {
                 .with_metric(Metric::InnerProduct)
                 .with_precision(*precision);
 
-            EmbeddingIndex::build(&data_ip, &index_dir, params).expect("Failed to build index");
+            EmbeddingIndex::build(&data_ip, &index_dir, &params).expect("Failed to build index");
             let index =
                 EmbeddingIndex::load(data_ip.clone(), &index_dir).expect("Failed to load index");
 
             let query_ip = vec![1.0, 0.0, 0.0, 0.0]; // Unnormalized query
 
             let results = index
-                .search(&query_ip, SearchParams::default())
+                .search(&query_ip, &SearchParams::default())
                 .expect("Failed to search");
 
             assert!(
@@ -708,7 +710,7 @@ mod embedding_index_tests {
             .with_metric(Metric::Hamming)
             .with_precision(Precision::Binary);
 
-        EmbeddingIndex::build(&data_hamming, &index_dir_hamming, params)
+        EmbeddingIndex::build(&data_hamming, &index_dir_hamming, &params)
             .expect("Failed to build index");
         let index_hamming =
             EmbeddingIndex::load(data_hamming, &index_dir_hamming).expect("Failed to load index");
@@ -717,7 +719,7 @@ mod embedding_index_tests {
         query_hamming.extend(vec![0.0; 16]);
 
         let results = index_hamming
-            .search(&query_hamming, SearchParams::default())
+            .search(&query_hamming, &SearchParams::default())
             .expect("Failed to search");
 
         assert!(!results.is_empty(), "No results for Hamming Binary");

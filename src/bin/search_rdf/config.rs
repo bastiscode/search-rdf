@@ -176,50 +176,39 @@ mod tests {
     #[test]
     fn test_parse_minimal_config() {
         let yaml = r#"
-data:
-  text: []
-embeddings:
-  models: []
-  datasets: []
+datasets: []
+models: []
+embeddings: []
 indices: []
 server:
   host: "0.0.0.0"
   port: 8080
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse config");
-        assert_eq!(config.server.host, "0.0.0.0");
-        assert_eq!(config.server.port, 8080);
+        let server = config.server.as_ref().unwrap();
+        assert_eq!(server.host, "0.0.0.0");
+        assert_eq!(server.port, 8080);
     }
 
     #[test]
     fn test_parse_full_config() {
         let yaml = r#"
-data:
-  text:
-    - name: wikidata_items
-      source:
-        type: sparql
-        endpoint: https://query.wikidata.org/sparql
-        query_file: queries/get_items.sparql
-        format: json
-      output: data/text/wikidata
+datasets: []
+
+models:
+  - name: primary_model
+    type: vllm
+    endpoint: http://localhost:8000
+    model_name: mixedbread-ai/mxbai-embed-large-v1
 
 embeddings:
-  models:
-    - name: primary_model
-      type: vllm
-      endpoint: http://localhost:8000
-      model_name: mixedbread-ai/mxbai-embed-large-v1
-
-  datasets:
-    - name: wikidata_embeddings
-      text_data: data/text/wikidata
-      model: primary_model
-      output: data/embeddings/wikidata
-      params:
-        batch_size: 32
-        normalize: true
-        show_progress: true
+  - name: wikidata_embeddings
+    model: primary_model
+    output: data/embeddings/wikidata
+    type: text
+    dataset: data/text/wikidata
+    params:
+      normalize: true
 
 indices:
   - name: wikidata_keyword
@@ -228,27 +217,27 @@ indices:
     output: indices/wikidata/keyword
 
   - name: wikidata_semantic
-    type: text_embedding
+    type: text-embedding
     text_data: data/text/wikidata
     embedding_data: data/embeddings/wikidata
     output: indices/wikidata/semantic
-    metric: cosine_normalized
-    precision: float32
+    params:
+      metric: cosine-normalized
+      precision: float32
 
 server:
   host: 0.0.0.0
   port: 8080
   cors: true
   indices:
-    - name: wikidata_keyword
-      path: indices/wikidata/keyword
-      type: keyword
+    - wikidata_keyword
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse config");
-        assert_eq!(config.data.text.len(), 1);
-        assert_eq!(config.embeddings.models.len(), 1);
-        assert_eq!(config.embeddings.datasets.len(), 1);
-        assert_eq!(config.indices.len(), 2);
-        assert_eq!(config.server.indices.len(), 1);
+        assert_eq!(config.datasets.as_ref().map(|d| d.len()).unwrap_or(0), 0);
+        assert_eq!(config.models.as_ref().unwrap().len(), 1);
+        assert_eq!(config.embeddings.as_ref().unwrap().len(), 1);
+        assert_eq!(config.indices.as_ref().unwrap().len(), 2);
+        let server = config.server.as_ref().unwrap();
+        assert_eq!(server.indices.len(), 1);
     }
 }

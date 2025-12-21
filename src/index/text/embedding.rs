@@ -417,7 +417,7 @@ mod tests {
                     .with_metric(*metric)
                     .with_precision(*precision);
 
-                TextEmbeddingIndex::build(&data, &index_dir, params)
+                TextEmbeddingIndex::build(&data, &index_dir, &params)
                     .expect("Failed to build index");
                 let index = TextEmbeddingIndex::load(data.clone(), &index_dir)
                     .expect("Failed to load index");
@@ -426,7 +426,7 @@ mod tests {
                 normalize(&mut query);
 
                 let results = index
-                    .search(Query::Embedding(&query), SearchParams::default())
+                    .search(Query::Embedding(&query), &SearchParams::default())
                     .expect("Failed to search");
 
                 // Should find Q1 (Cat) as top result
@@ -482,7 +482,7 @@ mod tests {
 
                 // Test search with filter - exclude Q1
                 let results_filtered = index
-                    .search_with_filter(Query::Embedding(&query), SearchParams::default(), |id| {
+                    .search_with_filter(Query::Embedding(&query), &SearchParams::default(), |id| {
                         id != 0
                     })
                     .expect("Failed to search with filter");
@@ -542,14 +542,14 @@ mod tests {
                 .with_metric(Metric::InnerProduct)
                 .with_precision(*precision);
 
-            TextEmbeddingIndex::build(&data_ip, &index_dir, params).expect("Failed to build index");
+            TextEmbeddingIndex::build(&data_ip, &index_dir, &params).expect("Failed to build index");
             let index = TextEmbeddingIndex::load(data_ip.clone(), &index_dir)
                 .expect("Failed to load index");
 
             let query_ip = vec![1.0, 0.0, 0.0, 0.0]; // Unnormalized query
 
             let results = index
-                .search(Query::Embedding(&query_ip), SearchParams::default())
+                .search(Query::Embedding(&query_ip), &SearchParams::default())
                 .expect("Failed to search");
 
             assert!(
@@ -606,7 +606,7 @@ mod tests {
             .with_metric(Metric::Hamming)
             .with_precision(Precision::Binary);
 
-        TextEmbeddingIndex::build(&data_hamming, &index_dir_hamming, params)
+        TextEmbeddingIndex::build(&data_hamming, &index_dir_hamming, &params)
             .expect("Failed to build index");
         let index_hamming = TextEmbeddingIndex::load(data_hamming, &index_dir_hamming)
             .expect("Failed to load index");
@@ -615,7 +615,7 @@ mod tests {
         query_hamming.extend(vec![0.0; 16]);
 
         let results = index_hamming
-            .search(Query::Embedding(&query_hamming), SearchParams::default())
+            .search(Query::Embedding(&query_hamming), &SearchParams::default())
             .expect("Failed to search");
 
         assert!(!results.is_empty(), "No results for Hamming Binary");
@@ -688,7 +688,7 @@ mod tests {
         create_dir_all(&index_dir).expect("Failed to create index dir");
 
         let params = EmbeddingIndexParams::from_precision(Precision::Float32);
-        TextEmbeddingIndex::build(&text_embeddings, &index_dir, params)
+        TextEmbeddingIndex::build(&text_embeddings, &index_dir, &params)
             .expect("Failed to build index");
         let index = TextEmbeddingIndex::load(text_embeddings.clone(), &index_dir)
             .expect("Failed to load index");
@@ -698,7 +698,7 @@ mod tests {
         normalize(&mut query1);
 
         let results1 = index
-            .search(Query::Embedding(&query1), SearchParams::default())
+            .search(Query::Embedding(&query1), &SearchParams::default())
             .expect("Failed to search");
 
         assert!(!results1.is_empty(), "No results for query1");
@@ -724,7 +724,7 @@ mod tests {
         normalize(&mut query2);
 
         let results2 = index
-            .search(Query::Embedding(&query2), SearchParams::default())
+            .search(Query::Embedding(&query2), &SearchParams::default())
             .expect("Failed to search");
 
         assert!(!results2.is_empty(), "No results for query2");
@@ -749,7 +749,7 @@ mod tests {
         normalize(&mut query3);
 
         let results3 = index
-            .search(Query::Embedding(&query3), SearchParams::default())
+            .search(Query::Embedding(&query3), &SearchParams::default())
             .expect("Failed to search");
 
         assert!(!results3.is_empty(), "No results for query3");
@@ -774,7 +774,7 @@ mod tests {
         normalize(&mut query4);
 
         let results4 = index
-            .search(Query::Embedding(&query4), SearchParams::default())
+            .search(Query::Embedding(&query4), &SearchParams::default())
             .expect("Failed to search");
 
         assert!(!results4.is_empty(), "No results for query4");

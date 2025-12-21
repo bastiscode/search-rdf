@@ -20,9 +20,9 @@ impl<'a, 'py> FromPyObject<'a, 'py> for Metric {
             return Err(anyhow!("Metric must be a string"));
         };
         match value.to_lowercase().as_str() {
-            "cosinenormalized" | "cosine_normalized" => Ok(Metric::CosineNormalized),
+            "cosinenormalized" | "cosine-normalized" => Ok(Metric::CosineNormalized),
             "cosine" => Ok(Metric::Cosine),
-            "inner_product" | "innerproduct" | "ip" => Ok(Metric::InnerProduct),
+            "inner-product" | "innerproduct" | "ip" => Ok(Metric::InnerProduct),
             "euclidean" | "l2" => Ok(Metric::L2),
             "hamming" => Ok(Metric::Hamming),
             other => Err(anyhow!("unsupported metric: {other}")),
