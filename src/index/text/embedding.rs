@@ -6,6 +6,7 @@ use crate::index::{EmbeddingIndexParams, Match, Search, SearchParams};
 use crate::utils::load_u32_vec;
 use crate::utils::{load_json, write_json};
 use anyhow::{Result, anyhow};
+use log::info;
 use ordered_float::OrderedFloat;
 use std::cmp::Reverse;
 use std::fs::{File, create_dir_all};
@@ -197,7 +198,8 @@ impl Search for TextEmbeddingIndex {
 
         let index = Index::new(&options)?;
 
-        index.reserve(data.total_fields() as usize)?;
+        let total_fields = data.total_fields();
+        index.reserve(total_fields as usize)?;
 
         let mut field_to_data_file =
             BufWriter::new(File::create(index_dir.join("index.field-to-data"))?);
@@ -217,6 +219,12 @@ impl Search for TextEmbeddingIndex {
 
                 field_id += 1;
                 field_to_data_file.write_all(&id.to_le_bytes())?;
+
+                // Log progress every 1M fields
+                if field_id % 1_000_000 == 0 {
+                    let percentage = (field_id as f64 / total_fields as f64) * 100.0;
+                    info!("Indexed {} / {} embeddings ({:.1}%) from {} items", field_id, total_fields, percentage, id + 1);
+                }
             }
         }
 

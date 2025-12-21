@@ -7,6 +7,7 @@ use axum::{
     routing::{get, post},
 };
 use futures::future::try_join_all;
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -40,20 +41,20 @@ pub async fn run(config_path: &str) -> Result<()> {
     let config = Config::load(config_path)?;
 
     let Some(server) = config.server else {
-        println!("No server configuration found.");
+        info!("No server configuration found.");
         return Ok(());
     };
 
     let Some(indices) = config.indices else {
-        println!("No index configuration found.");
+        info!("No index configuration found.");
         return Ok(());
     };
 
-    println!("Loading indices...");
+    info!("Loading indices...");
     let mut search_indices = HashMap::new();
 
     for name in server.indices {
-        println!("  Loading {}...", name);
+        info!("Loading {}...", name);
 
         let index_config = indices
             .iter()
@@ -61,7 +62,7 @@ pub async fn run(config_path: &str) -> Result<()> {
             .ok_or_else(|| anyhow!("Index configuration not found for {}", name))?;
 
         let search_index = load_index(&index_config.index_type, &index_config.output)?;
-        println!("  [OK] {}", name);
+        info!("[OK] {}", name);
 
         search_indices.insert(name, search_index);
     }
@@ -85,11 +86,11 @@ pub async fn run(config_path: &str) -> Result<()> {
     }
 
     let addr = format!("{}:{}", server.host, server.port);
-    println!("\nServing on http://{}", addr);
-    println!("Available endpoints:");
-    println!("  GET  /health");
-    println!("  GET  /indices");
-    println!("  POST /search/{{index}}");
+    info!("Serving on http://{}", addr);
+    info!("Available endpoints:");
+    info!("GET  /health");
+    info!("GET  /indices");
+    info!("POST /search/{{index}}");
 
     let listener = TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;

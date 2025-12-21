@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use log::info;
 use std::path::Path;
 
 use search_rdf::data::DataSource;
@@ -13,25 +14,25 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
     let config = Config::load(config_path)?;
 
     let Some(indices) = config.indices else {
-        println!("No index configuration found.");
+        info!("No index configuration found.");
         return Ok(());
     };
 
-    println!("Building {} indices...", indices.len());
+    info!("Building {} indices...", indices.len());
 
     for index_config in indices {
         if index_config.output.exists() && !force {
-            println!(
-                "  [SKIP] {} (output exists, use --force to rebuild)",
+            info!(
+                "[SKIP] {} (output exists, use --force to rebuild)",
                 index_config.name
             );
             continue;
         }
 
-        println!("  [BUILD] {}...", index_config.name);
+        info!("[BUILD] {}...", index_config.name);
         build_index(&index_config.index_type, &index_config.output)?;
-        println!(
-            "  [OK] {} -> {}",
+        info!(
+            "[OK] {} -> {}",
             index_config.name,
             index_config.output.display()
         );
@@ -86,8 +87,8 @@ fn build_keyword_index(text_data_path: &Path, output_path: &Path) -> Result<()> 
         text_data_path.display()
     ))?;
 
-    println!(
-        "    Loaded {} text items with {} fields",
+    info!(
+        "Loaded {} text items with {} fields",
         text_data.len(),
         text_data.total_fields()
     );
@@ -107,13 +108,13 @@ fn build_text_embedding_index(
     let text_embeddings = TextEmbeddings::load(text_data, embedding_data_path)
         .context("Failed to load text embeddings")?;
 
-    println!(
-        "    Loaded {} text items with {} fields",
+    info!(
+        "Loaded {} text items with {} fields",
         text_embeddings.text_data().len(),
         text_embeddings.text_data().total_fields()
     );
-    println!(
-        "    Loaded {} embeddings for {} items ({} dimensions)",
+    info!(
+        "Loaded {} embeddings for {} items ({} dimensions)",
         text_embeddings.total_fields(),
         text_embeddings.len(),
         text_embeddings.num_dimensions()
@@ -134,8 +135,8 @@ fn build_embedding_index(
         embedding_data_path.display()
     ))?;
 
-    println!(
-        "    Loaded {} embeddings for {} items ({} dimensions)",
+    info!(
+        "Loaded {} embeddings for {} items ({} dimensions)",
         embeddings.total_fields(),
         embeddings.len(),
         embeddings.num_dimensions()

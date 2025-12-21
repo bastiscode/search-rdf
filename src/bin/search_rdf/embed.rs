@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use log::info;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -13,12 +14,12 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
     let config = Config::load(config_path)?;
 
     let Some(embed) = config.embeddings else {
-        println!("No embedding configuration found.");
+        info!("No embedding configuration found.");
         return Ok(());
     };
 
     let Some(mut model_configs) = config.models else {
-        println!("No models defined in configuration.");
+        info!("No models defined in configuration.");
         return Ok(());
     };
 
@@ -30,20 +31,20 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
 
     // Load models
     let mut models: HashMap<String, EmbeddingModel> = HashMap::new();
-    println!("Loading {} models...", model_configs.len());
+    info!("Loading {} models...", model_configs.len());
 
     for model_config in model_configs {
         let model = load_model(&model_config.model_type)?;
-        println!("  [OK] Model loaded: {}", model_config.name);
+        info!("[OK] Model loaded: {}", model_config.name);
         models.insert(model_config.name, model);
     }
 
-    println!("Generating embeddings for {} datasets...", embed.len());
+    info!("Generating embeddings for {} datasets...", embed.len());
 
     for embed_config in &embed {
         if embed_config.output.exists() && !force {
-            println!(
-                "  [SKIP] {} (output exists, use --force to rebuild)",
+            info!(
+                "[SKIP] {} (output exists, use --force to rebuild)",
                 embed_config.name
             );
             continue;
@@ -53,7 +54,7 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
             .get(&embed_config.model)
             .ok_or_else(|| anyhow!("Model not found: {}", embed_config.model))?;
 
-        println!("  [BUILD] {}...", embed_config.name);
+        info!("[BUILD] {}...", embed_config.name);
 
         match &embed_config.dataset {
             EmbeddingDatasetConfig::Text { dataset, params } => {
@@ -61,8 +62,8 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
             }
         }
 
-        println!(
-            "  [OK] {} -> {}",
+        info!(
+            "[OK] {} -> {}",
             embed_config.name,
             embed_config.output.display()
         );
@@ -82,9 +83,9 @@ fn build_text_embeddings(
         dataset.display()
     ))?;
 
-    println!("    Loaded {} text items", text_data.len());
+    info!("Loaded {} text items", text_data.len());
 
-    println!("    Embedding {} text fields...", text_data.total_fields());
+    info!("Embedding {} text fields...", text_data.total_fields());
 
     // Generate embeddings as batches and write them to a temporary file
     // Then convert that file to a safetensors file

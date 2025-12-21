@@ -16,7 +16,6 @@ struct Inner {
     model: Py<PyAny>,
     name: String,
     batch_size: usize,
-    show_progress: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -36,7 +35,7 @@ impl SentenceTransformer {
         Ok(model_instance)
     }
 
-    pub fn load(name: &str, device: &str, batch_size: usize, show_progress: bool) -> Result<Self> {
+    pub fn load(name: &str, device: &str, batch_size: usize) -> Result<Self> {
         let model = Python::attach(|py| -> Result<Py<PyAny>> {
             let model_instance = Self::load_python_model(py, name, device)?;
             Ok(model_instance.into())
@@ -46,7 +45,6 @@ impl SentenceTransformer {
                 model,
                 name: name.to_string(),
                 batch_size,
-                show_progress,
             }),
         })
     }
@@ -67,7 +65,6 @@ impl Embed for SentenceTransformer {
             kwargs.set_item("batch_size", self.inner.batch_size)?;
             kwargs.set_item("embedding_dim", params.num_dimensions)?;
             kwargs.set_item("normalize", params.normalize)?;
-            kwargs.set_item("show_progress", self.inner.show_progress)?;
 
             let embeddings = model.call_method("embed", (inputs,), Some(&kwargs))?;
             Ok(embeddings.extract()?)
@@ -111,7 +108,7 @@ mod tests {
     #[test]
     #[ignore] // Requires model download and Python environment
     fn test_load_model() {
-        let result = SentenceTransformer::load(TEST_MODEL, "cpu", 16, false);
+        let result = SentenceTransformer::load(TEST_MODEL, "cpu", 16);
         assert!(result.is_ok(), "Failed to load model: {:?}", result.err());
 
         let model = result.unwrap();
@@ -122,7 +119,8 @@ mod tests {
     #[test]
     #[ignore] // Requires model download and Python environment
     fn test_num_dimensions() {
-        let model = SentenceTransformer::load(TEST_MODEL, "cpu", 16, false).expect("Failed to load model");
+        let model =
+            SentenceTransformer::load(TEST_MODEL, "cpu", 16).expect("Failed to load model");
 
         // Need to specify the type parameter for EmbeddingModel trait
         let dim = model.num_dimensions();
@@ -132,7 +130,8 @@ mod tests {
     #[test]
     #[ignore] // Requires model download and Python environment
     fn test_embed_single_text() {
-        let model = SentenceTransformer::load(TEST_MODEL, "cpu", 16, false).expect("Failed to load model");
+        let model =
+            SentenceTransformer::load(TEST_MODEL, "cpu", 16).expect("Failed to load model");
 
         let inputs = vec!["This is a test sentence."];
         let params = EmbeddingParams::default();
@@ -153,7 +152,8 @@ mod tests {
     #[test]
     #[ignore] // Requires model download and Python environment
     fn test_embed_multiple_texts() {
-        let model = SentenceTransformer::load(TEST_MODEL, "cpu", 16, false).expect("Failed to load model");
+        let model =
+            SentenceTransformer::load(TEST_MODEL, "cpu", 16).expect("Failed to load model");
 
         let inputs = vec![
             "The quick brown fox jumps over the lazy dog.",
@@ -190,7 +190,8 @@ mod tests {
     #[test]
     #[ignore] // Requires model download and Python environment
     fn test_embed_with_string_types() {
-        let model = SentenceTransformer::load(TEST_MODEL, "cpu", 16, false).expect("Failed to load model");
+        let model =
+            SentenceTransformer::load(TEST_MODEL, "cpu", 16).expect("Failed to load model");
 
         let params = EmbeddingParams::default();
 
@@ -221,7 +222,8 @@ mod tests {
     #[test]
     #[ignore] // Requires model download and Python environment
     fn test_embed_empty_input() {
-        let model = SentenceTransformer::load(TEST_MODEL, "cpu", 16, false).expect("Failed to load model");
+        let model =
+            SentenceTransformer::load(TEST_MODEL, "cpu", 16).expect("Failed to load model");
 
         let inputs: Vec<&str> = vec![];
         let params = EmbeddingParams::default();
@@ -236,7 +238,8 @@ mod tests {
     #[test]
     #[ignore] // Requires model download and Python environment
     fn test_embed_with_custom_batch_size() {
-        let model = SentenceTransformer::load(TEST_MODEL, "cpu", 2, false).expect("Failed to load model");
+        let model =
+            SentenceTransformer::load(TEST_MODEL, "cpu", 2).expect("Failed to load model");
 
         let inputs = vec![
             "First sentence.",
@@ -264,7 +267,8 @@ mod tests {
     #[test]
     #[ignore] // Requires model download and Python environment
     fn test_embed_normalized_vs_unnormalized() {
-        let model = SentenceTransformer::load(TEST_MODEL, "cpu", 16, false).expect("Failed to load model");
+        let model =
+            SentenceTransformer::load(TEST_MODEL, "cpu", 16).expect("Failed to load model");
 
         let inputs = vec!["Normalization test."];
 
@@ -301,7 +305,7 @@ mod tests {
     #[test]
     #[ignore] // Requires model download, Python environment, and CUDA GPU
     fn test_load_model_cuda() {
-        let result = SentenceTransformer::load(TEST_MODEL, "cuda", 16, false);
+        let result = SentenceTransformer::load(TEST_MODEL, "cuda", 16);
         assert!(
             result.is_ok(),
             "Failed to load model on CUDA: {:?}",
@@ -315,8 +319,8 @@ mod tests {
     #[test]
     #[ignore] // Requires model download, Python environment, and CUDA GPU
     fn test_embed_cuda() {
-        let model =
-            SentenceTransformer::load(TEST_MODEL, "cuda", 16, false).expect("Failed to load model on CUDA");
+        let model = SentenceTransformer::load(TEST_MODEL, "cuda", 16)
+            .expect("Failed to load model on CUDA");
 
         let inputs = vec![
             "The quick brown fox jumps over the lazy dog.",
@@ -356,10 +360,10 @@ mod tests {
     #[ignore] // Requires model download, Python environment, and CUDA GPU
     fn test_cuda_cpu_consistency() {
         // Load same model on both CPU and CUDA
-        let model_cpu =
-            SentenceTransformer::load(TEST_MODEL, "cpu", 16, false).expect("Failed to load model on CPU");
-        let model_cuda =
-            SentenceTransformer::load(TEST_MODEL, "cuda", 16, false).expect("Failed to load model on CUDA");
+        let model_cpu = SentenceTransformer::load(TEST_MODEL, "cpu", 16)
+            .expect("Failed to load model on CPU");
+        let model_cuda = SentenceTransformer::load(TEST_MODEL, "cuda", 16)
+            .expect("Failed to load model on CUDA");
 
         let inputs = vec!["Test sentence for CPU-CUDA consistency check."];
         let params = EmbeddingParams::default();
@@ -397,8 +401,8 @@ mod tests {
     #[test]
     #[ignore] // Requires model download, Python environment, and CUDA GPU
     fn test_cuda_large_batch() {
-        let model =
-            SentenceTransformer::load(TEST_MODEL, "cuda", 32, false).expect("Failed to load model on CUDA");
+        let model = SentenceTransformer::load(TEST_MODEL, "cuda", 32)
+            .expect("Failed to load model on CUDA");
 
         // Create a larger batch to test GPU efficiency
         let inputs: Vec<String> = (0..100)

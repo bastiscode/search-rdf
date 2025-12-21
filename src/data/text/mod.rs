@@ -8,6 +8,7 @@ use crate::data::text::item::TextItem;
 
 use super::DataSource;
 use anyhow::{Result, anyhow};
+use log::info;
 use memmap2::Mmap;
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write};
@@ -55,6 +56,11 @@ impl TextData {
 
             identifier_map.add(&item.identifier, id)?;
             data_map.add(encoded.len(), item.num_fields())?;
+
+            // Log progress every 1M items
+            if (id + 1) % 1_000_000 == 0 {
+                info!("Processed {} items, {} fields", id + 1, data_map.total_count);
+            }
         }
 
         let data_map_file = data_dir.join("data-map.bin");

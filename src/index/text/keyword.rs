@@ -4,6 +4,7 @@ use crate::index::{Match, Search, SearchParams};
 use crate::utils::{load_u32_vec, load_usize_vec_from_u64};
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
+use log::info;
 use memmap2::Mmap;
 use ordered_float::OrderedFloat;
 use pathfinding::{kuhn_munkres::kuhn_munkres, matrix::Matrix};
@@ -523,6 +524,7 @@ impl Search for KeywordIndex {
             BufWriter::new(File::create(index_dir.join("index.field-to-data"))?);
         let mut lengths_file = BufWriter::new(File::create(index_dir.join("index.lengths"))?);
 
+        let total_fields = data.total_fields();
         let mut field_id = 0;
         for (id, fields) in data.items() {
             for name in fields.into_iter().map(normalize) {
@@ -538,6 +540,12 @@ impl Search for KeywordIndex {
                 field_id += 1;
                 field_to_data_file.write_all(&id.to_le_bytes())?;
                 lengths_file.write_all(&length.to_le_bytes())?;
+
+                // Log progress every 1M fields
+                if field_id % 1_000_000 == 0 {
+                    let percentage = (field_id as f64 / total_fields as f64) * 100.0;
+                    info!("Indexed {} / {} fields ({:.1}%) from {} items", field_id, total_fields, percentage, id + 1);
+                }
             }
         }
 

@@ -2,6 +2,7 @@ mod search_rdf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use log::{info, LevelFilter};
 
 #[derive(Parser)]
 #[command(name = "search-rdf")]
@@ -18,6 +19,14 @@ struct Cli {
     /// Force rebuild even if output exists (used when no subcommand is specified)
     #[arg(long, global = true)]
     force: bool,
+
+    /// Enable verbose/debug logging
+    #[arg(short, long, global = true)]
+    verbose: bool,
+
+    /// Suppress info messages (errors and warnings only)
+    #[arg(short, long, global = true)]
+    quiet: bool,
 }
 
 #[derive(Subcommand)]
@@ -59,6 +68,21 @@ enum Commands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Initialize logger
+    let log_level = if cli.quiet {
+        LevelFilter::Warn
+    } else if cli.verbose {
+        LevelFilter::Debug
+    } else {
+        LevelFilter::Info
+    };
+
+    env_logger::Builder::from_default_env()
+        .filter_level(log_level)
+        .format_timestamp(None)
+        .format_target(false)
+        .init();
+
     match cli.command {
         Some(Commands::Data { config, force }) => search_rdf::data::run(&config, force),
         Some(Commands::Embed { config, force }) => search_rdf::embed::run(&config, force),
@@ -80,22 +104,22 @@ fn main() -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("Configuration file is required"))?;
             let force = cli.force;
 
-            println!("Running all steps in sequence...\n");
+            info!("Running all steps in sequence...");
 
             // Step 1: Data
-            println!("=== Step 1/4: Data ===");
+            info!("=== Step 1/4: Data ===");
             search_rdf::data::run(config, force)?;
 
             // Step 2: Embed
-            println!("\n=== Step 2/4: Embed ===");
+            info!("=== Step 2/4: Embed ===");
             search_rdf::embed::run(config, force)?;
 
             // Step 3: Index
-            println!("\n=== Step 3/4: Index ===");
+            info!("=== Step 3/4: Index ===");
             search_rdf::index::run(config, force)?;
 
             // Step 4: Serve
-            println!("\n=== Step 4/4: Serve ===");
+            info!("=== Step 4/4: Serve ===");
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(num_cpus::get())
                 .max_blocking_threads(num_cpus::get() * 4)

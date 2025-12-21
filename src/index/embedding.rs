@@ -8,6 +8,7 @@ use crate::{
     index::{Match, Search},
 };
 use anyhow::{Result, anyhow};
+use log::info;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
@@ -337,10 +338,12 @@ impl Search for EmbeddingIndex {
 
         let index = Index::new(&options)?;
 
-        index.reserve(data.total_fields() as usize)?;
+        let total_fields = data.total_fields();
+        index.reserve(total_fields as usize)?;
 
         // Add all embeddings to the index using their IDs as keys (not indices)
         // Multiple embeddings can have the same ID
+        let mut field_count = 0u32;
         for (id, embeddings) in data.items() {
             for emb in embeddings {
                 if params.precision == Precision::Binary {
@@ -348,6 +351,13 @@ impl Search for EmbeddingIndex {
                     index.add(id as u64, b1x8::from_u8s(&binary_emb))?;
                 } else {
                     index.add(id as u64, emb)?;
+                }
+                field_count += 1;
+
+                // Log progress every 1M fields
+                if field_count % 1_000_000 == 0 {
+                    let percentage = (field_count as f64 / total_fields as f64) * 100.0;
+                    info!("Indexed {} / {} embeddings ({:.1}%) from {} items", field_count, total_fields, percentage, id + 1);
                 }
             }
         }

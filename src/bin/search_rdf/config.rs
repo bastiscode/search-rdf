@@ -76,17 +76,11 @@ pub enum ModelType {
         device: String,
         #[serde(default = "default_batch_size")]
         batch_size: usize,
-        #[serde(default = "default_show_progress")]
-        show_progress: bool,
     },
 }
 
 fn default_device() -> String {
     "cpu".to_string()
-}
-
-fn default_show_progress() -> bool {
-    false
 }
 
 fn default_batch_size() -> usize {

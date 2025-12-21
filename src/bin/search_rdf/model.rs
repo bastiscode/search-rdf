@@ -20,9 +20,8 @@ pub fn load_model(model_type: &ModelType) -> Result<EmbeddingModel> {
             model_name,
             device,
             batch_size,
-            show_progress,
         } => {
-            let st = SentenceTransformer::load(model_name, device, *batch_size, *show_progress)?;
+            let st = SentenceTransformer::load(model_name, device, *batch_size)?;
             Ok(EmbeddingModel::SentenceTransformer(st))
         }
     }

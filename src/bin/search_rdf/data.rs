@@ -1,4 +1,5 @@
 use anyhow::Result;
+use log::{info, debug};
 use search_rdf::data::TextData;
 use search_rdf::data::text::item::TextItem;
 use search_rdf::data::text::item::jsonl::stream_text_items_from_jsonl_file;
@@ -16,29 +17,29 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
     let config = Config::load(config_path)?;
 
     let Some(datasets) = config.datasets else {
-        println!("No datasets defined in configuration.");
+        info!("No datasets defined in configuration.");
         return Ok(());
     };
 
-    println!("Building {} datasets...", datasets.len());
+    info!("Building {} datasets...", datasets.len());
 
     for dataset in &datasets {
         if dataset.output.exists() && !force {
-            println!(
-                "  [SKIP] {} (output exists, use --force to rebuild)",
+            info!(
+                "[SKIP] {} (output exists, use --force to rebuild)",
                 dataset.name
             );
             continue;
         }
 
-        println!("  [BUILD] {}...", dataset.name);
+        info!("[BUILD] {}...", dataset.name);
         match &dataset.data_type {
             DataType::Text { source } => {
                 build_text_data(source, &dataset.output)?;
             }
         }
 
-        println!("  [OK] {} -> {}", dataset.name, dataset.output.display());
+        info!("[OK] {} -> {}", dataset.name, dataset.output.display());
     }
 
     Ok(())
@@ -67,7 +68,7 @@ fn build_text_data(source: &TextSource, output: &Path) -> Result<()> {
         }
     };
 
-    println!("    Building text dataset...");
+    info!("Building text dataset...");
 
     // Build TextData
     TextData::build(items, output)?;
@@ -81,10 +82,9 @@ pub fn execute_sparql_query(
     format: SPARQLResultFormat,
     headers: Option<&HashMap<String, String>>,
 ) -> Result<impl Read> {
-    println!("    Executing SPARQL query against {}:", endpoint);
-    // Print query with indentation
+    debug!("Executing SPARQL query against {}", endpoint);
     for line in query.lines() {
-        println!("      {}", line);
+        debug!("{}", line);
     }
     let url = format!("{}?query={}", endpoint, urlencoding::encode(query));
 
