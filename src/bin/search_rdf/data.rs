@@ -67,6 +67,8 @@ fn build_text_data(source: &TextSource, output: &Path) -> Result<()> {
         }
     };
 
+    println!("    Building text dataset...");
+
     // Build TextData
     TextData::build(items, output)?;
 
@@ -79,7 +81,14 @@ pub fn execute_sparql_query(
     format: SPARQLResultFormat,
     headers: Option<&HashMap<String, String>>,
 ) -> Result<impl Read> {
-    let mut request = ureq::post(endpoint)
+    println!("    Executing SPARQL query against {}:", endpoint);
+    // Print query with indentation
+    for line in query.lines() {
+        println!("      {}", line);
+    }
+    let url = format!("{}?query={}", endpoint, urlencoding::encode(query));
+
+    let mut request = ureq::get(&url)
         .header("User-Agent", "search-rdf-bot")
         .header("Accept", format.mime_type());
 
@@ -89,6 +98,6 @@ pub fn execute_sparql_query(
         }
     }
 
-    let response = request.send_json(serde_json::json!({ "query": query }))?;
+    let response = request.call()?;
     Ok(response.into_body().into_reader())
 }
