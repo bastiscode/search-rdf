@@ -58,8 +58,12 @@ impl TextData {
             data_map.add(encoded.len(), item.num_fields())?;
 
             // Log progress every 1M items
-            if (id + 1) % 1_000_000 == 0 {
-                info!("Processed {} items, {} fields", id + 1, data_map.total_count);
+            if (id + 1).is_multiple_of(1_000_000) {
+                info!(
+                    "Processed {} items, {} fields",
+                    id + 1,
+                    data_map.total_count
+                );
             }
         }
 

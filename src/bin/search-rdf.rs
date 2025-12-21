@@ -2,7 +2,7 @@ mod search_rdf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use log::{info, LevelFilter};
+use log::{LevelFilter, info};
 
 #[derive(Parser)]
 #[command(name = "search-rdf")]

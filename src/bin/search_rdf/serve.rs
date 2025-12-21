@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::search_rdf::index::load_index;
+use crate::search_rdf::{index::load_index, model::load_model};
 use search_rdf::index::text::embedding::Query;
 use search_rdf::index::{Match, Search, SearchParams};
 use search_rdf::{
@@ -40,31 +40,50 @@ impl AppState {
 pub async fn run(config_path: &str) -> Result<()> {
     let config = Config::load(config_path)?;
 
-    let Some(server) = config.server else {
+    let Some(server) = &config.server else {
         info!("No server configuration found.");
         return Ok(());
     };
 
-    let Some(indices) = config.indices else {
-        info!("No index configuration found.");
-        return Ok(());
-    };
+    info!("Loading models...");
+    for name in &server.models {
+        info!("Loading model {}...", name);
+
+        let model_config = config
+            .models
+            .as_ref()
+            .ok_or_else(|| anyhow!("No model configurations found"))?
+            .iter()
+            .find(|&model| &model.name == name)
+            .ok_or_else(|| anyhow!("Model configuration not found for {}", name))?;
+
+        let model = load_model(&model_config.model_type)?;
+        info!(
+            "[OK] {} (type: {}, dimensions: {})",
+            name,
+            model.model_type(),
+            model.num_dimensions()
+        );
+    }
 
     info!("Loading indices...");
     let mut search_indices = HashMap::new();
 
-    for name in server.indices {
-        info!("Loading {}...", name);
+    for name in &server.indices {
+        info!("Loading index {}...", name);
 
-        let index_config = indices
+        let index_config = config
+            .indices
+            .as_ref()
+            .ok_or_else(|| anyhow!("No index configurations found"))?
             .iter()
-            .find(|&index| index.name == name)
+            .find(|&index| &index.name == name)
             .ok_or_else(|| anyhow!("Index configuration not found for {}", name))?;
 
         let search_index = load_index(&index_config.index_type, &index_config.output)?;
         info!("[OK] {}", name);
 
-        search_indices.insert(name, search_index);
+        search_indices.insert(name.to_string(), search_index);
     }
 
     let state = AppState::new(search_indices);
@@ -210,10 +229,7 @@ fn convert_to_text_search_matches(
                 .field(id, field)
                 .ok_or_else(|| anyhow!("Failed to get field {} for id {}", field, id))?
                 .to_string();
-            MatchInfo::Text {
-                identifier,
-                field: field,
-            }
+            MatchInfo::Text { identifier, field }
         } else {
             MatchInfo::None
         };

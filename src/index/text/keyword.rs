@@ -525,6 +525,9 @@ impl Search for KeywordIndex {
         let mut lengths_file = BufWriter::new(File::create(index_dir.join("index.lengths"))?);
 
         let total_fields = data.total_fields();
+        // every 5% or every 100,000 fields, whichever is smaller
+        let log_every = (total_fields / 20).min(100_000).max(1);
+
         let mut field_id = 0;
         for (id, fields) in data.items() {
             for name in fields.into_iter().map(normalize) {
@@ -541,10 +544,15 @@ impl Search for KeywordIndex {
                 field_to_data_file.write_all(&id.to_le_bytes())?;
                 lengths_file.write_all(&length.to_le_bytes())?;
 
-                // Log progress every 1M fields
-                if field_id % 1_000_000 == 0 {
+                if field_id.is_multiple_of(log_every) {
                     let percentage = (field_id as f64 / total_fields as f64) * 100.0;
-                    info!("Indexed {} / {} fields ({:.1}%) from {} items", field_id, total_fields, percentage, id + 1);
+                    info!(
+                        "Indexed {} / {} fields ({:.1}%) from {} items",
+                        field_id,
+                        total_fields,
+                        percentage,
+                        id + 1
+                    );
                 }
             }
         }

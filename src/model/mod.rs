@@ -27,6 +27,13 @@ impl EmbeddingModel {
             EmbeddingModel::Vllm(m) => m.model_type(),
         }
     }
+
+    pub fn num_dimensions(&self) -> usize {
+        match self {
+            EmbeddingModel::SentenceTransformer(m) => m.num_dimensions(),
+            EmbeddingModel::Vllm(m) => m.num_dimensions(),
+        }
+    }
 }
 
 pub trait Embed {

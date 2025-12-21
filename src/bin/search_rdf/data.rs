@@ -1,5 +1,5 @@
 use anyhow::Result;
-use log::{info, debug};
+use log::{debug, info};
 use search_rdf::data::TextData;
 use search_rdf::data::text::item::TextItem;
 use search_rdf::data::text::item::jsonl::stream_text_items_from_jsonl_file;

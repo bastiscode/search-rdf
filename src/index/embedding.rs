@@ -341,6 +341,9 @@ impl Search for EmbeddingIndex {
         let total_fields = data.total_fields();
         index.reserve(total_fields as usize)?;
 
+        // Log every 5% or every 100,000 embeddings, whichever is smaller
+        let log_every = (total_fields / 20).min(100_000).max(1);
+
         // Add all embeddings to the index using their IDs as keys (not indices)
         // Multiple embeddings can have the same ID
         let mut field_count = 0u32;
@@ -354,10 +357,15 @@ impl Search for EmbeddingIndex {
                 }
                 field_count += 1;
 
-                // Log progress every 1M fields
-                if field_count % 1_000_000 == 0 {
+                if field_count.is_multiple_of(log_every) {
                     let percentage = (field_count as f64 / total_fields as f64) * 100.0;
-                    info!("Indexed {} / {} embeddings ({:.1}%) from {} items", field_count, total_fields, percentage, id + 1);
+                    info!(
+                        "Indexed {} / {} embeddings ({:.1}%) from {} items",
+                        field_count,
+                        total_fields,
+                        percentage,
+                        id + 1
+                    );
                 }
             }
         }

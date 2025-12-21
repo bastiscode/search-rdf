@@ -74,7 +74,7 @@ pub enum ModelType {
         model_name: String,
         #[serde(default = "default_device")]
         device: String,
-        #[serde(default = "default_batch_size")]
+        #[serde(default = "default_st_batch_size")]
         batch_size: usize,
     },
 }
@@ -83,7 +83,7 @@ fn default_device() -> String {
     "cpu".to_string()
 }
 
-fn default_batch_size() -> usize {
+fn default_st_batch_size() -> usize {
     16
 }
 
@@ -101,8 +101,15 @@ pub struct EmbeddingConfig {
 pub enum EmbeddingDatasetConfig {
     Text {
         dataset: PathBuf,
+        #[serde(default = "default_emb_batch_size")]
+        batch_size: usize,
+        #[serde(default)]
         params: EmbeddingParams,
     },
+}
+
+fn default_emb_batch_size() -> usize {
+    64
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -123,10 +130,12 @@ pub enum IndexType {
     TextEmbedding {
         text_data: PathBuf,
         embedding_data: PathBuf,
+        #[serde(default)]
         params: EmbeddingIndexParams,
     },
     Embedding {
         embedding_data: PathBuf,
+        #[serde(default)]
         params: EmbeddingIndexParams,
     },
 }
@@ -137,11 +146,12 @@ pub struct ServerConfig {
     pub host: String,
     #[serde(default = "default_port")]
     pub port: u16,
-    #[serde(default)]
     // References the names of the indices specified in the indexes section
-    pub indices: Vec<String>,
     #[serde(default)]
-    pub models: Vec<ModelConfig>,
+    pub indices: Vec<String>,
+    // Refrerences the names of the models specified in the models section
+    #[serde(default)]
+    pub models: Vec<String>,
     #[serde(default)]
     pub cors: bool,
 }
@@ -250,7 +260,12 @@ server:
         assert_eq!(dataset.output, PathBuf::from("data/text/test"));
         match &dataset.data_type {
             DataType::Text { source } => match source {
-                TextSource::SparqlQuery { endpoint, query, format, headers } => {
+                TextSource::SparqlQuery {
+                    endpoint,
+                    query,
+                    format,
+                    headers,
+                } => {
                     assert_eq!(endpoint, "https://query.wikidata.org/sparql");
                     assert!(query.contains("SELECT ?item ?label"));
                     assert_eq!(format, &SPARQLResultFormat::JSON);

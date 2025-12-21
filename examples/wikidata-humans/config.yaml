@@ -23,17 +23,40 @@ datasets:
           ?item ^schema:about/wikibase:sitelinks ?sitelinks
         }
         ORDER BY DESC(?sitelinks) DESC(?item)
+        LIMIT 100000
       format: json
+
+models:
+  - name: text-embedding
+    type: vllm
+    endpoint: http://localhost:8000
+    model_name: mixedbread-ai/mxbai-embed-xsmall-v1
+
+embeddings:
+  - name: wikidata-humans-embeddings
+    model: text-embedding
+    output: data/embeddings.safetensors
+    type: text
+    dataset: data/
+    batch_size: 1024
 
 indices:
   - name: wikidata-humans-keyword
     type: keyword
     text_data: data/
-    output: index/
+    output: index/keyword/
+  - name: wikidata-humans-embedding
+    type: text-embedding
+    text_data: data/
+    embedding_data: data/embeddings.safetensors
+    output: index/embedding/
 
 server:
   host: 0.0.0.0
   port: 8080
   cors: true
+  models:
+    - text-embedding
   indices:
     - wikidata-humans-keyword
+    - wikidata-humans-embedding

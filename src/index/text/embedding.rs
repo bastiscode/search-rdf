@@ -201,6 +201,9 @@ impl Search for TextEmbeddingIndex {
         let total_fields = data.total_fields();
         index.reserve(total_fields as usize)?;
 
+        // every 5% or every 100,000 fields, whichever is smaller
+        let log_every = (total_fields / 20).min(100_000).max(1);
+
         let mut field_to_data_file =
             BufWriter::new(File::create(index_dir.join("index.field-to-data"))?);
         let mut field_id: u32 = 0;
@@ -220,10 +223,15 @@ impl Search for TextEmbeddingIndex {
                 field_id += 1;
                 field_to_data_file.write_all(&id.to_le_bytes())?;
 
-                // Log progress every 1M fields
-                if field_id % 1_000_000 == 0 {
+                if field_id.is_multiple_of(log_every) {
                     let percentage = (field_id as f64 / total_fields as f64) * 100.0;
-                    info!("Indexed {} / {} embeddings ({:.1}%) from {} items", field_id, total_fields, percentage, id + 1);
+                    info!(
+                        "Indexed {} / {} embeddings ({:.1}%) from {} items",
+                        field_id,
+                        total_fields,
+                        percentage,
+                        id + 1
+                    );
                 }
             }
         }
@@ -550,7 +558,8 @@ mod tests {
                 .with_metric(Metric::InnerProduct)
                 .with_precision(*precision);
 
-            TextEmbeddingIndex::build(&data_ip, &index_dir, &params).expect("Failed to build index");
+            TextEmbeddingIndex::build(&data_ip, &index_dir, &params)
+                .expect("Failed to build index");
             let index = TextEmbeddingIndex::load(data_ip.clone(), &index_dir)
                 .expect("Failed to load index");
 
