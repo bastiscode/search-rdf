@@ -18,7 +18,7 @@ use sparesults::{
 
 use crate::data::text::item::TextItem;
 
-#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SPARQLResultFormat {
     #[default]

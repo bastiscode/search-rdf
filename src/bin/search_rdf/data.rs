@@ -33,7 +33,7 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
 
         println!("  [BUILD] {}...", dataset.name);
         match &dataset.data_type {
-            DataType::Text(source) => {
+            DataType::Text { source } => {
                 build_text_data(source, &dataset.output)?;
             }
         }

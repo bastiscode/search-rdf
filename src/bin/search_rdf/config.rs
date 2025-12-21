@@ -33,7 +33,7 @@ pub struct DataConfig {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DataType {
-    Text(TextSource),
+    Text { source: TextSource },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -193,7 +193,22 @@ server:
     #[test]
     fn test_parse_full_config() {
         let yaml = r#"
-datasets: []
+datasets:
+  - name: test-dataset
+    output: data/text/test
+    type: text
+    source:
+      type: sparql-query
+      endpoint: https://query.wikidata.org/sparql
+      query: |
+        SELECT ?item ?label
+        WHERE {
+          ?item wdt:P31 wd:Q5 .
+          ?item rdfs:label ?label .
+          FILTER(LANG(?label) = "en")
+        }
+        LIMIT 1000
+      format: json
 
 models:
   - name: primary_model
@@ -233,7 +248,24 @@ server:
     - wikidata_keyword
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse config");
-        assert_eq!(config.datasets.as_ref().map(|d| d.len()).unwrap_or(0), 0);
+
+        // Check datasets
+        assert_eq!(config.datasets.as_ref().unwrap().len(), 1);
+        let dataset = &config.datasets.as_ref().unwrap()[0];
+        assert_eq!(dataset.name, "test-dataset");
+        assert_eq!(dataset.output, PathBuf::from("data/text/test"));
+        match &dataset.data_type {
+            DataType::Text { source } => match source {
+                TextSource::SparqlQuery { endpoint, query, format, headers } => {
+                    assert_eq!(endpoint, "https://query.wikidata.org/sparql");
+                    assert!(query.contains("SELECT ?item ?label"));
+                    assert_eq!(format, &SPARQLResultFormat::JSON);
+                    assert!(headers.is_none());
+                }
+                _ => panic!("Expected SparqlQuery source"),
+            },
+        }
+
         assert_eq!(config.models.as_ref().unwrap().len(), 1);
         assert_eq!(config.embeddings.as_ref().unwrap().len(), 1);
         assert_eq!(config.indices.as_ref().unwrap().len(), 2);
