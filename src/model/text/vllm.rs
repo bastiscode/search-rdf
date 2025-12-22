@@ -139,6 +139,10 @@ impl VLLM {
             }),
         })
     }
+
+    pub fn max_model_len(&self) -> usize {
+        self.inner.max_model_len
+    }
 }
 
 impl Embed for VLLM {

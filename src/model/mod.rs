@@ -28,6 +28,13 @@ impl EmbeddingModel {
         }
     }
 
+    pub fn max_input_len(&self) -> Option<usize> {
+        match self {
+            EmbeddingModel::SentenceTransformer(..) => None,
+            EmbeddingModel::Vllm(m) => Some(m.max_model_len()),
+        }
+    }
+
     pub fn num_dimensions(&self) -> usize {
         match self {
             EmbeddingModel::SentenceTransformer(m) => m.num_dimensions(),
@@ -62,7 +69,7 @@ pub fn normalize_embedding(mut embedding: Embedding) -> Embedding {
     embedding
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct EmbeddingParams {
     num_dimensions: Option<usize>,
     #[serde(default = "default_normalize")]

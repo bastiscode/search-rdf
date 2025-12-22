@@ -60,6 +60,8 @@ pub struct ModelConfig {
     pub name: String,
     #[serde(flatten)]
     pub model_type: ModelType,
+    #[serde(default)]
+    pub params: EmbeddingParams,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -103,8 +105,6 @@ pub enum EmbeddingDatasetConfig {
         dataset: PathBuf,
         #[serde(default = "default_emb_batch_size")]
         batch_size: usize,
-        #[serde(default)]
-        params: EmbeddingParams,
     },
 }
 
@@ -134,6 +134,7 @@ pub enum IndexType {
     TextEmbedding {
         text_data: PathBuf,
         embedding_data: PathBuf,
+        model: String,
         #[serde(default)]
         params: EmbeddingIndexParams,
     },
@@ -142,6 +143,15 @@ pub enum IndexType {
         #[serde(default)]
         params: EmbeddingIndexParams,
     },
+}
+
+impl IndexType {
+    pub fn get_model(&self) -> Option<&str> {
+        match self {
+            IndexType::TextEmbedding { model, .. } => Some(model),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -153,9 +163,6 @@ pub struct ServerConfig {
     // References the names of the indices specified in the indexes section
     #[serde(default)]
     pub indices: Vec<String>,
-    // Refrerences the names of the models specified in the models section
-    #[serde(default)]
-    pub models: Vec<String>,
     #[serde(default)]
     pub cors: bool,
 }
@@ -247,6 +254,7 @@ indices:
     params:
       metric: cosine-normalized
       precision: float32
+    model: primary_model
 
 server:
   host: 0.0.0.0

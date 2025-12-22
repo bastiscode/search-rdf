@@ -15,24 +15,42 @@ use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::search_rdf::{index::load_index, model::load_model};
-use search_rdf::index::text::embedding::Query;
-use search_rdf::index::{Match, Search, SearchParams};
 use search_rdf::{
     data::{DataSource, TextData},
     index::SearchIndex,
+    model::Embed,
+};
+use search_rdf::{index::text::embedding::Query, model::EmbeddingModel};
+use search_rdf::{
+    index::{Match, Search, SearchParams},
+    model::EmbeddingParams,
 };
 
 use crate::search_rdf::config::Config;
 
+struct Inner {
+    indices: HashMap<String, SearchIndex>,
+    models: HashMap<String, (EmbeddingModel, EmbeddingParams)>,
+    index_to_model: HashMap<String, String>,
+}
+
 #[derive(Clone)]
 struct AppState {
-    indices: Arc<HashMap<String, SearchIndex>>,
+    inner: Arc<Inner>,
 }
 
 impl AppState {
-    fn new(indices: HashMap<String, SearchIndex>) -> Self {
+    fn new(
+        indices: HashMap<String, SearchIndex>,
+        models: HashMap<String, (EmbeddingModel, EmbeddingParams)>,
+        index_to_model: HashMap<String, String>,
+    ) -> Self {
         Self {
-            indices: Arc::new(indices),
+            inner: Arc::new(Inner {
+                indices,
+                models,
+                index_to_model,
+            }),
         }
     }
 }
@@ -45,29 +63,10 @@ pub async fn run(config_path: &str) -> Result<()> {
         return Ok(());
     };
 
-    info!("Loading models...");
-    for name in &server.models {
-        info!("Loading model {}...", name);
-
-        let model_config = config
-            .models
-            .as_ref()
-            .ok_or_else(|| anyhow!("No model configurations found"))?
-            .iter()
-            .find(|&model| &model.name == name)
-            .ok_or_else(|| anyhow!("Model configuration not found for {}", name))?;
-
-        let model = load_model(&model_config.model_type)?;
-        info!(
-            "[OK] {} (type: {}, dimensions: {})",
-            name,
-            model.model_type(),
-            model.num_dimensions()
-        );
-    }
-
-    info!("Loading indices...");
+    info!("Loading indices and models...");
     let mut search_indices = HashMap::new();
+    let mut models = HashMap::new();
+    let mut index_to_model: HashMap<String, String> = HashMap::new();
 
     for name in &server.indices {
         info!("Loading index {}...", name);
@@ -80,13 +79,42 @@ pub async fn run(config_path: &str) -> Result<()> {
             .find(|&index| &index.name == name)
             .ok_or_else(|| anyhow!("Index configuration not found for {}", name))?;
 
+        if let Some(model) = index_config.index_type.get_model()
+            && !models.contains_key(model)
+        {
+            info!("  - Requires model: {}", model);
+
+            let model_config = config
+                .models
+                .as_ref()
+                .ok_or_else(|| anyhow!("No model configurations found"))?
+                .iter()
+                .find(|&m| m.name == model)
+                .ok_or_else(|| anyhow!("Model configuration not found for {}", model))?;
+
+            let model = load_model(&model_config.model_type)?;
+            info!(
+                "  [OK] {} (type: {}, dimensions: {}, max_input_len: {})",
+                name,
+                model.model_type(),
+                model.num_dimensions(),
+                model
+                    .max_input_len()
+                    .map(|len| len.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            );
+
+            models.insert(model_config.name.clone(), (model, model_config.params));
+            index_to_model.insert(name.to_string(), model_config.name.clone());
+        }
+
         let search_index = load_index(&index_config.index_type, &index_config.output)?;
         info!("[OK] {}", name);
 
         search_indices.insert(name.to_string(), search_index);
     }
 
-    let state = AppState::new(search_indices);
+    let state = AppState::new(search_indices, models, index_to_model);
 
     // Build router
     let mut app = Router::new()
@@ -131,6 +159,7 @@ struct IndexInfo {
 
 async fn list_indices(State(state): State<AppState>) -> Json<Vec<IndexInfo>> {
     let indices = state
+        .inner
         .indices
         .iter()
         .map(|(name, index)| IndexInfo {
@@ -259,12 +288,23 @@ async fn search(
     State(state): State<AppState>,
     Json(req): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, AppError> {
-    let index = state.indices.get(&index_name).cloned().ok_or_else(|| {
-        AppError(
-            StatusCode::BAD_REQUEST,
-            anyhow!("Index not found: {}", index_name),
-        )
-    })?;
+    let index = state
+        .inner
+        .indices
+        .get(&index_name)
+        .cloned()
+        .ok_or_else(|| {
+            AppError(
+                StatusCode::BAD_REQUEST,
+                anyhow!("Index not found: {}", index_name),
+            )
+        })?;
+
+    let model = state
+        .inner
+        .index_to_model
+        .get(&index_name)
+        .and_then(|model_name| state.inner.models.get(model_name));
 
     let mut params = SearchParams::default().with_k(req.k).with_exact(req.exact);
 
@@ -287,15 +327,20 @@ async fn search(
             })
             .await?
         }
-        (SearchIndex::TextEmbedding(..), QueryType::Text(..)) => {
+        (SearchIndex::TextEmbedding(index), QueryType::Text(text)) => {
             // For text embedding index with text query, we'd need to embed the text first
-            // This requires having an embedding model available
-            return Err(AppError(
-                StatusCode::BAD_REQUEST,
-                anyhow!(
-                    "Text queries for text_embedding indices require embedding model (not yet implemented)"
-                ),
-            ));
+            let Some((model, model_params)) = model else {
+                return Err(anyhow!("Embedding model not found for index {}", index_name).into());
+            };
+            let embeddings = match model {
+                EmbeddingModel::SentenceTransformer(m) => m.embed(&text, model_params)?,
+                EmbeddingModel::Vllm(m) => m.embed(&text, model_params)?,
+            };
+            search_parallel(embeddings, move |emb| {
+                let matches = index.search(Query::Embedding(&emb), &params)?;
+                convert_to_text_search_matches(matches, index.data().text_data())
+            })
+            .await?
         }
         (SearchIndex::TextEmbedding(index), QueryType::Embedding(embedding)) => {
             search_parallel(embedding, move |emb| {

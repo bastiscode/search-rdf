@@ -41,18 +41,22 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
     });
 
     // Load models
-    let mut models: HashMap<String, EmbeddingModel> = HashMap::new();
+    let mut models = HashMap::new();
     info!("Loading {} models...", model_configs.len());
 
-    for model_config in model_configs {
+    for model_config in &model_configs {
         let model = load_model(&model_config.model_type)?;
         info!(
-            "[OK] {} (type: {}, dimensions: {})",
+            "[OK] {} (type: {}, dimensions: {}, max_input_len: {})",
             model_config.name,
             model.model_type(),
-            model.num_dimensions()
+            model.num_dimensions(),
+            model
+                .max_input_len()
+                .map(|len| len.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
         );
-        models.insert(model_config.name, model);
+        models.insert(model_config.name.clone(), (model, model_config.params));
     }
 
     info!("Generating embeddings for {} datasets...", embed.len());
@@ -66,7 +70,7 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
             continue;
         }
 
-        let model = models
+        let (model, params) = models
             .get(&embed_config.model)
             .ok_or_else(|| anyhow!("Model not found: {}", embed_config.model))?;
 
@@ -76,7 +80,6 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
             EmbeddingDatasetConfig::Text {
                 dataset,
                 batch_size,
-                params,
             } => {
                 build_text_embeddings(dataset, &embed_config.output, *batch_size, params, model)?;
             }

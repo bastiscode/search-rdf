@@ -44,6 +44,7 @@ indices:
     text_data: data/
     embedding_data: data/embeddings.safetensors
     output: index/embedding/
+    model: text-embedding
 
 server:
   host: 0.0.0.0

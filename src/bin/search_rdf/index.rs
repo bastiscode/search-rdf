@@ -49,6 +49,7 @@ fn build_index(index_type: &IndexType, output: &Path) -> Result<()> {
             text_data,
             embedding_data,
             params,
+            ..
         } => build_text_embedding_index(text_data, embedding_data, params, output),
         IndexType::Embedding {
             embedding_data,
