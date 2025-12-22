@@ -526,7 +526,7 @@ impl Search for KeywordIndex {
 
         let total_fields = data.total_fields();
         // every 5% or every 100,000 fields, whichever is smaller
-        let log_every = (total_fields / 20).min(100_000).max(1);
+        let log_every = (total_fields / 20).clamp(1, 100_000);
 
         let mut field_id = 0;
         for (id, fields) in data.items() {

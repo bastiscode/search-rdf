@@ -5,7 +5,7 @@ use std::path::Path;
 use search_rdf::data::DataSource;
 use search_rdf::data::embedding::Embeddings;
 use search_rdf::data::text::{TextData, TextEmbeddings};
-use search_rdf::index::text::{KeywordIndex, TextEmbeddingIndex};
+use search_rdf::index::text::{FullTextIndex, KeywordIndex, TextEmbeddingIndex};
 use search_rdf::index::{EmbeddingIndex, EmbeddingIndexParams, Search, SearchIndex};
 
 use crate::search_rdf::config::{Config, IndexType};
@@ -44,6 +44,7 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
 fn build_index(index_type: &IndexType, output: &Path) -> Result<()> {
     match index_type {
         IndexType::Keyword { text_data } => build_keyword_index(text_data, output),
+        IndexType::FullText { text_data } => build_full_text_index(text_data, output),
         IndexType::TextEmbedding {
             text_data,
             embedding_data,
@@ -62,6 +63,11 @@ pub fn load_index(index_type: &IndexType, output: &Path) -> Result<SearchIndex> 
             let text_data = TextData::load(text_data)?;
             let index = KeywordIndex::load(text_data, output)?;
             Ok(SearchIndex::Keyword(index))
+        }
+        IndexType::FullText { text_data } => {
+            let text_data = TextData::load(text_data)?;
+            let index = FullTextIndex::load(text_data, output)?;
+            Ok(SearchIndex::FullText(index))
         }
         IndexType::TextEmbedding {
             text_data,
@@ -94,6 +100,23 @@ fn build_keyword_index(text_data_path: &Path, output_path: &Path) -> Result<()> 
     );
 
     KeywordIndex::build(&text_data, output_path, &())?;
+
+    Ok(())
+}
+
+fn build_full_text_index(text_data_path: &Path, output_path: &Path) -> Result<()> {
+    let text_data = TextData::load(text_data_path).context(format!(
+        "Failed to load text data from: {}",
+        text_data_path.display()
+    ))?;
+
+    info!(
+        "Loaded {} text items with {} fields",
+        text_data.len(),
+        text_data.total_fields()
+    );
+
+    FullTextIndex::build(&text_data, output_path, &())?;
 
     Ok(())
 }

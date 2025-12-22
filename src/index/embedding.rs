@@ -342,7 +342,7 @@ impl Search for EmbeddingIndex {
         index.reserve(total_fields as usize)?;
 
         // Log every 5% or every 100,000 embeddings, whichever is smaller
-        let log_every = (total_fields / 20).min(100_000).max(1);
+        let log_every = (total_fields / 20).clamp(1, 100_000);
 
         // Add all embeddings to the index using their IDs as keys (not indices)
         // Multiple embeddings can have the same ID

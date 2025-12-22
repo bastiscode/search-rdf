@@ -1,5 +1,5 @@
 use anyhow::Result;
-use log::{debug, info};
+use log::info;
 use search_rdf::data::TextData;
 use search_rdf::data::text::item::TextItem;
 use search_rdf::data::text::item::jsonl::stream_text_items_from_jsonl_file;
@@ -48,8 +48,15 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
 fn build_text_data(source: &TextSource, output: &Path) -> Result<()> {
     // Get iterator of TextItems based on source type
     let items: Box<dyn Iterator<Item = Result<TextItem>>> = match source {
-        TextSource::Jsonl { path } => Box::new(stream_text_items_from_jsonl_file(path)?),
+        TextSource::Jsonl { path } => {
+            info!("Streaming text data from JSONL file: {}", path.display());
+            Box::new(stream_text_items_from_jsonl_file(path)?)
+        }
         TextSource::Sparql { path, format } => {
+            info!(
+                "Streaming text data from SPARQL result file: {}",
+                path.display()
+            );
             Box::new(stream_text_items_from_sparql_result_file(path, *format)?)
         }
         TextSource::SparqlQuery {
@@ -82,10 +89,11 @@ pub fn execute_sparql_query(
     format: SPARQLResultFormat,
     headers: Option<&HashMap<String, String>>,
 ) -> Result<impl Read> {
-    debug!("Executing SPARQL query against {}", endpoint);
-    for line in query.lines() {
-        debug!("{}", line);
-    }
+    info!(
+        "Executing SPARQL query against {}:\n{}",
+        endpoint,
+        query.trim()
+    );
     let url = format!("{}?query={}", endpoint, urlencoding::encode(query));
 
     let mut request = ureq::get(&url)
@@ -94,6 +102,7 @@ pub fn execute_sparql_query(
 
     if let Some(headers) = headers {
         for (key, value) in headers {
+            info!("With header \"{}: {}\"", key, value);
             request = request.header(key, value);
         }
     }

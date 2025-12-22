@@ -280,6 +280,13 @@ async fn search(
             })
             .await?
         }
+        (SearchIndex::FullText(index), QueryType::Text(text)) => {
+            search_parallel(text, move |text| {
+                let matches = index.search(text.as_str(), &params)?;
+                convert_to_text_search_matches(matches, index.data())
+            })
+            .await?
+        }
         (SearchIndex::TextEmbedding(..), QueryType::Text(..)) => {
             // For text embedding index with text query, we'd need to embed the text first
             // This requires having an embedding model available

@@ -113,13 +113,13 @@ fn build_text_embeddings(
     );
 
     // Log every 5% or every 100,000 embeddings, whichever is smaller
-    let log_every = (text_data.total_fields() / 20).min(100_000).max(1);
+    let log_every = (text_data.total_fields() / 20).clamp(1, 100_000);
 
     let temp_file = NamedTempFile::new().context("Failed to create temporary file")?;
     let temp_file_path = temp_file.path().to_path_buf();
     let mut temp_file = BufWriter::new(temp_file);
 
-    let mut num_embeddings: usize = 0;
+    let mut num_embeddings: u32 = 0;
     for chunk in &text_data
         .items()
         .flat_map(|(_, fields)| fields)

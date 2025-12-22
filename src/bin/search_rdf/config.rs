@@ -126,6 +126,10 @@ pub enum IndexType {
     Keyword {
         text_data: PathBuf,
     },
+    #[serde(rename = "full-text")]
+    FullText {
+        text_data: PathBuf,
+    },
     #[serde(rename = "text-embedding")]
     TextEmbedding {
         text_data: PathBuf,

@@ -202,7 +202,7 @@ impl Search for TextEmbeddingIndex {
         index.reserve(total_fields as usize)?;
 
         // every 5% or every 100,000 fields, whichever is smaller
-        let log_every = (total_fields / 20).min(100_000).max(1);
+        let log_every = (total_fields / 20).clamp(1, 100_000);
 
         let mut field_to_data_file =
             BufWriter::new(File::create(index_dir.join("index.field-to-data"))?);

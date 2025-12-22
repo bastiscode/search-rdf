@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::model::{Embed, EmbeddingParams};
 use anyhow::{Result, anyhow};
+use log::info;
 use ureq::Agent;
 
 #[derive(Debug)]
@@ -9,6 +10,7 @@ struct Inner {
     endpoint: String,
     model_name: String,
     num_dimensions: usize,
+    max_model_len: usize,
     agent: Agent,
 }
 
@@ -36,10 +38,38 @@ fn embedding_from_value(value: &serde_json::Value, params: &EmbeddingParams) -> 
     Ok(params.apply(embedding))
 }
 
+fn fetch_max_model_len(agent: &Agent, model_name: &str, endpoint: &str) -> Result<usize> {
+    let response = agent
+        .get(format!("{endpoint}/v1/models"))
+        .header("Accept", "application/json")
+        .call()?;
+
+    let value: serde_json::Value = response.into_body().read_json()?;
+    let max_len = value
+        .get("data")
+        .ok_or_else(|| anyhow!("Missing 'data' field in response"))?
+        .as_array()
+        .ok_or_else(|| anyhow!("'data' field is not an array"))?
+        .iter()
+        .find_map(|value| {
+            let id = value.get("id")?.as_str()?;
+            if id == model_name { Some(value) } else { None }
+        })
+        .ok_or_else(|| anyhow!("Model '{}' not found in server", model_name))?
+        .get("max_model_len")
+        .ok_or_else(|| anyhow!("Missing 'max_model_len' field in response"))?
+        .as_u64()
+        .ok_or_else(|| anyhow!("'max_model_len' field cannot be converted to u64"))?
+        as usize;
+
+    Ok(max_len)
+}
+
 fn embed(
     agent: &Agent,
     endpoint: &str,
     inputs: &[impl AsRef<str>],
+    max_model_len: usize,
     params: &EmbeddingParams,
 ) -> Result<Vec<Vec<f32>>> {
     if inputs.is_empty() {
@@ -48,10 +78,11 @@ fn embed(
     // Implement the logic to call the VLLM endpoint and retrieve embeddings
     // This is a placeholder implementation
     let response = agent
-        .post(endpoint)
+        .post(format!("{endpoint}/v1/embeddings"))
         .header("Content-Type", "application/json")
         .send_json(serde_json::json!({
             "input": inputs.iter().map(|s| s.as_ref()).collect::<Vec<_>>(),
+            "truncate_prompt_tokens": max_model_len,
         }))?;
 
     let value: serde_json::Value = response.into_body().read_json()?;
@@ -68,23 +99,43 @@ fn embed(
 impl VLLM {
     pub fn new(endpoint: &str, model_name: &str) -> Result<Self> {
         let agent = Agent::new_with_defaults();
-        let endpoint = format!("{}/v1/embeddings", endpoint);
+        info!(
+            "[vLLM] Initializing model '{}' with endpoint '{}'",
+            model_name, endpoint
+        );
+
+        let max_model_len = fetch_max_model_len(&agent, model_name, endpoint)?;
+        info!(
+            "[vLLM] Got max_model_len={} for model '{}'",
+            max_model_len, model_name
+        );
 
         let test_inputs = vec!["test"];
-        let embeddings = embed(&agent, &endpoint, &test_inputs, &EmbeddingParams::default())?;
+        let embeddings = embed(
+            &agent,
+            endpoint,
+            &test_inputs,
+            max_model_len,
+            &EmbeddingParams::default(),
+        )?;
         if embeddings.len() != test_inputs.len() {
             return Err(anyhow!(
                 "Failed to validate VLLM embedding model: unexpected number of embeddings returned"
             ));
         }
         let num_dimensions = embeddings[0].len();
+        info!(
+            "[vLLM] Got num_dimensions={} for model '{}'",
+            num_dimensions, model_name
+        );
 
         Ok(Self {
             inner: Arc::new(Inner {
-                endpoint,
+                endpoint: endpoint.to_string(),
                 model_name: model_name.to_string(),
                 agent,
                 num_dimensions,
+                max_model_len,
             }),
         })
     }
@@ -98,7 +149,13 @@ impl Embed for VLLM {
     where
         I: AsRef<Self::Input>,
     {
-        embed(&self.inner.agent, &self.inner.endpoint, inputs, params)
+        embed(
+            &self.inner.agent,
+            &self.inner.endpoint,
+            inputs,
+            self.inner.max_model_len,
+            params,
+        )
     }
 
     fn num_dimensions(&self) -> usize {

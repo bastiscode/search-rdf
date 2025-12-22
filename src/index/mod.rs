@@ -2,6 +2,7 @@ pub mod embedding;
 pub mod text;
 
 use crate::data::DataSource;
+use crate::index::text::FullTextIndex;
 use anyhow::Result;
 use pyo3::IntoPyObject;
 use std::path::Path;
@@ -86,6 +87,7 @@ impl SearchParams {
 #[derive(Debug, Clone)]
 pub enum SearchIndex {
     Keyword(KeywordIndex),
+    FullText(FullTextIndex),
     TextEmbedding(TextEmbeddingIndex),
     Embedding(EmbeddingIndex),
 }
@@ -93,9 +95,10 @@ pub enum SearchIndex {
 impl SearchIndex {
     pub fn index_type(&self) -> &'static str {
         match self {
-            SearchIndex::Keyword(idx) => idx.index_type(),
-            SearchIndex::TextEmbedding(idx) => idx.index_type(),
-            SearchIndex::Embedding(idx) => idx.index_type(),
+            SearchIndex::Keyword(index) => index.index_type(),
+            SearchIndex::FullText(index) => index.index_type(),
+            SearchIndex::TextEmbedding(index) => index.index_type(),
+            SearchIndex::Embedding(index) => index.index_type(),
         }
     }
 }
