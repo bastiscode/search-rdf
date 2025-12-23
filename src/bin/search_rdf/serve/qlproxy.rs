@@ -13,7 +13,6 @@ use sparesults::{
     QueryResultsFormat, QueryResultsParser, QueryResultsSerializer, QuerySolution,
     ReaderQueryResultsParserOutput,
 };
-use tantivy::schema::Value;
 
 use crate::search_rdf::serve::search::{
     MatchInfo, perform_text_search, perform_text_search_with_filter,
@@ -124,6 +123,14 @@ fn determine_output_vars(params: &QlProxyParams, row_var: &str) -> Vec<Variable>
     }
 
     vars
+}
+
+fn get_id_from_identifier(index: &SearchIndex, identifier: &str) -> Option<u32> {
+    match index {
+        SearchIndex::Keyword(idx) => idx.data().id_from_identifier(identifier),
+        SearchIndex::TextEmbedding(idx) => idx.data().text_data().id_from_identifier(identifier),
+        _ => None,
+    }
 }
 
 pub async fn qlproxy(
@@ -242,21 +249,12 @@ pub async fn qlproxy(
 
             let id = match term {
                 Term::Literal(lit) => {
-                    let id = lit.value().as_u64().ok_or_else(|| {
-                        anyhow!("Expected integer literal representing an ID-based identifier")
+                    let id = lit.value().parse::<u32>().map_err(|e| {
+                        anyhow!("Expected integer literal representing an Id-based identifier: {e}")
                     })?;
-                    Some(id as u32)
+                    Some(id)
                 }
-                Term::NamedNode(node) => {
-                    let identifier = node.as_str();
-                    match &index {
-                        SearchIndex::Keyword(index) => index.data().id_from_identifier(identifier),
-                        SearchIndex::TextEmbedding(index) => {
-                            index.data().text_data().id_from_identifier(identifier)
-                        }
-                        _ => None,
-                    }
-                }
+                Term::NamedNode(node) => get_id_from_identifier(&index, node.as_str()),
                 _ => {
                     return Err(AppError(
                         StatusCode::BAD_REQUEST,
@@ -302,10 +300,6 @@ pub async fn qlproxy(
     } else {
         perform_text_search(index, queries, search_params, model).await?
     };
-
-    if matches.len() != rows.len() {
-        return Err(anyhow!("Mismatch between number of rows and search results").into());
-    }
 
     // Determine output variable names
     let output_vars = determine_output_vars(&params, row_var);
