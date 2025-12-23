@@ -42,7 +42,7 @@ curl -X POST http://localhost:8080/search/wikidata-movies-embedding-binary \
 ## Notes
 
 - Query fetches instances of human (Q5) with English labels and aliases
-- Limited to 10,000 results (adjust `LIMIT` in config.yaml for more)
+- Limited to 100,000 results (adjust `LIMIT` in config.yaml for more)
 - Puts data in `data/` and indices in `indices/`
 - Feel free to add more indices with other precision types, like fp16,
 bf16, or int8

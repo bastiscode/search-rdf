@@ -164,10 +164,10 @@ pub fn stream_text_items_from_sparql_result<R: Read>(
 
     let parser = json_parser
         .for_reader(reader)
-        .map_err(|e| anyhow!("Failed to create SPARQL JSON parser: {}", e))?;
+        .map_err(|e| anyhow!("Failed to create SPARQL result parser: {}", e))?;
 
     let ReaderQueryResultsParserOutput::Solutions(solutions) = parser else {
-        return Err(anyhow!("Expected SPARQL JSON select result"));
+        return Err(anyhow!("Expected SPARQL result in {:?} format", format));
     };
 
     Ok(SPARQLResultIterator::new(solutions))
