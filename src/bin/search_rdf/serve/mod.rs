@@ -1,6 +1,6 @@
 mod handlers;
-mod qlproxy;
 mod search;
+mod sparql;
 mod types;
 
 use anyhow::{Result, anyhow};
@@ -17,8 +17,8 @@ use crate::search_rdf::config::Config;
 use crate::search_rdf::{index::load_index, model::load_model};
 
 use self::handlers::{health, list_indices};
-use self::qlproxy::qlproxy;
 use self::search::search;
+use self::sparql::{qlproxy, service};
 use self::types::AppState;
 
 pub async fn run(config_path: &str) -> Result<()> {
@@ -87,6 +87,7 @@ pub async fn run(config_path: &str) -> Result<()> {
         .route("/health", get(health))
         .route("/indices", get(list_indices))
         .route("/search/{index}", post(search))
+        .route("/service/{index}", post(service))
         .route("/qlproxy/{index}", post(qlproxy))
         .with_state(state);
 
@@ -105,6 +106,7 @@ pub async fn run(config_path: &str) -> Result<()> {
     info!("GET  /health");
     info!("GET  /indices");
     info!("POST /search/{{index}}");
+    info!("POST /service/{{index}}");
     info!("POST /qlproxy/{{index}}");
 
     let listener = TcpListener::bind(&addr).await?;
