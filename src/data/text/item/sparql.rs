@@ -1,7 +1,8 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
+use log::warn;
 use oxrdf::{
-    Term,
     vocab::{rdf, xsd},
+    Term,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -123,10 +124,11 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         for result in self.inner.by_ref() {
             let Ok(solution) = result else {
-                return Some(Err(anyhow!(
-                    "Failed to parse SPARQL solution: {}",
+                warn!(
+                    "Unexpected error from SPARQL result iterator: {}",
                     result.unwrap_err()
-                )));
+                );
+                continue;
             };
 
             let solution = parse_solution(&solution);
@@ -318,12 +320,10 @@ mod tests {
                 .collect();
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Expected exactly 2 variables")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected exactly 2 variables"));
     }
 
     #[test]
@@ -347,12 +347,10 @@ mod tests {
                 .collect();
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Expected first variable to be an IRI")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected first variable to be an IRI"));
     }
 
     #[test]

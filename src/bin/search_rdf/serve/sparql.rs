@@ -20,7 +20,7 @@ use crate::search_rdf::serve::search::{MatchInfo, perform_text_search_with_filte
 use super::search::SearchMatch;
 use super::types::{AppError, AppState};
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct QlProxyParams {
     // Search parameters (query is required)
     query: String,
@@ -110,6 +110,10 @@ pub async fn qlproxy(
     Query(params): Query<QlProxyParams>,
     body: Bytes,
 ) -> Result<Response, AppError> {
+    info!(
+        "QL Proxy endpoint called for index: {}, params: {:?}",
+        index_name, params
+    );
     // Get index and model from state
     let index = state
         .inner
@@ -192,6 +196,8 @@ pub async fn qlproxy(
         }
     }
 
+    info!("Filtered to {} identifiers for search", id_to_row.len());
+
     // Build search params
     let mut search_params = SearchParams::default();
 
@@ -231,22 +237,20 @@ pub async fn qlproxy(
         .serialize_solutions_to_writer(&mut response_buffer, variables.clone())
         .map_err(|e| anyhow!("Failed to create serializer: {}", e))?;
 
-    for search_matches in matches {
-        for search_match in search_matches {
-            // Get the row binding from id_to_row map
-            let row = id_to_row.get(&search_match.id).cloned().ok_or_else(|| {
-                anyhow!(
-                    "No row found for identifier ID {} in search match",
-                    search_match.id
-                )
-            })?;
+    for search_match in matches.into_iter().flatten() {
+        // Get the row binding from id_to_row map
+        let row = id_to_row.get(&search_match.id).cloned().ok_or_else(|| {
+            anyhow!(
+                "No row found for identifier ID {} in search match",
+                search_match.id
+            )
+        })?;
 
-            let solution = search_match_to_solution(search_match, &variables, row)?;
+        let solution = search_match_to_solution(search_match, &variables, row)?;
 
-            serializer
-                .serialize(&solution)
-                .map_err(|e| anyhow!("Failed to serialize solution: {}", e))?;
-        }
+        serializer
+            .serialize(&solution)
+            .map_err(|e| anyhow!("Failed to serialize solution: {}", e))?;
     }
 
     serializer

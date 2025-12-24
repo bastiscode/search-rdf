@@ -6,6 +6,7 @@ mod types;
 use anyhow::{Result, anyhow};
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     routing::{get, post},
 };
 use log::info;
@@ -89,6 +90,7 @@ pub async fn run(config_path: &str) -> Result<()> {
         .route("/search/{index}", post(search))
         .route("/service/{index}", post(service))
         .route("/qlproxy/{index}", post(qlproxy))
+        .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100 MB
         .with_state(state);
 
     // Add CORS if enabled
