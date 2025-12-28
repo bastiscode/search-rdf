@@ -10,8 +10,13 @@ use search_rdf::index::{EmbeddingIndex, EmbeddingIndexParams, Search, SearchInde
 
 use crate::search_rdf::config::{Config, IndexType};
 
-pub fn run(config_path: &str, force: bool) -> Result<()> {
+pub fn run(config_path: &Path, force: bool) -> Result<()> {
     let config = Config::load(config_path)?;
+    let config_dir = config_path
+        .parent()
+        .context("Failed to get config directory")?;
+
+    info!("Building indices in {}", config_dir.display());
 
     let Some(indices) = config.indices else {
         info!("No index configuration found.");
@@ -21,7 +26,7 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
     info!("Building {} indices...", indices.len());
 
     for index_config in indices {
-        if index_config.output.exists() && !force {
+        if config_dir.join(&index_config.output).exists() && !force {
             info!(
                 "[SKIP] {} (output exists, use --force to rebuild)",
                 index_config.name
@@ -30,7 +35,7 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
         }
 
         info!("[BUILD] {}...", index_config.name);
-        build_index(&index_config.index_type, &index_config.output)?;
+        build_index(config_dir, &index_config.index_type, &index_config.output)?;
         info!(
             "[OK] {} -> {}",
             index_config.name,
@@ -41,33 +46,39 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
     Ok(())
 }
 
-fn build_index(index_type: &IndexType, output: &Path) -> Result<()> {
+fn build_index(base_dir: &Path, index_type: &IndexType, index_dir: &Path) -> Result<()> {
     match index_type {
-        IndexType::Keyword { text_data } => build_keyword_index(text_data, output),
-        IndexType::FullText { text_data } => build_full_text_index(text_data, output),
+        IndexType::Keyword { text_data } => build_keyword_index(base_dir, text_data, index_dir),
+        IndexType::FullText { text_data } => build_full_text_index(base_dir, text_data, index_dir),
         IndexType::TextEmbedding {
             text_data,
             embedding_data,
             params,
             ..
-        } => build_text_embedding_index(text_data, embedding_data, params, output),
+        } => build_text_embedding_index(base_dir, text_data, embedding_data, params, index_dir),
         IndexType::Embedding {
             embedding_data,
             params,
-        } => build_embedding_index(embedding_data, params, output),
+        } => build_embedding_index(base_dir, embedding_data, params, index_dir),
     }
 }
 
-pub fn load_index(index_type: &IndexType, output: &Path) -> Result<SearchIndex> {
+pub fn load_index(
+    base_dir: &Path,
+    index_type: &IndexType,
+    index_dir: &Path,
+) -> Result<SearchIndex> {
+    let index_dir = base_dir.join(index_dir);
+
     match index_type {
         IndexType::Keyword { text_data } => {
-            let text_data = TextData::load(text_data)?;
-            let index = KeywordIndex::load(text_data, output)?;
+            let text_data = TextData::load(&base_dir.join(text_data))?;
+            let index = KeywordIndex::load(text_data, &index_dir)?;
             Ok(SearchIndex::Keyword(index))
         }
         IndexType::FullText { text_data } => {
-            let text_data = TextData::load(text_data)?;
-            let index = FullTextIndex::load(text_data, output)?;
+            let text_data = TextData::load(&base_dir.join(text_data))?;
+            let index = FullTextIndex::load(text_data, &index_dir)?;
             Ok(SearchIndex::FullText(index))
         }
         IndexType::TextEmbedding {
@@ -75,21 +86,24 @@ pub fn load_index(index_type: &IndexType, output: &Path) -> Result<SearchIndex> 
             embedding_data,
             ..
         } => {
-            let text_data = TextData::load(text_data)?;
-            let text_embeddings = TextEmbeddings::load(text_data, embedding_data)?;
-            let index = TextEmbeddingIndex::load(text_embeddings, output)?;
+            let text_data = TextData::load(&base_dir.join(text_data))?;
+            let text_embeddings = TextEmbeddings::load(text_data, &base_dir.join(embedding_data))?;
+            let index = TextEmbeddingIndex::load(text_embeddings, &index_dir)?;
             Ok(SearchIndex::TextEmbedding(index))
         }
         IndexType::Embedding { embedding_data, .. } => {
-            let embeddings = Embeddings::load(embedding_data)?;
-            let index = EmbeddingIndex::load(embeddings, output)?;
+            let embeddings = Embeddings::load(&base_dir.join(embedding_data))?;
+            let index = EmbeddingIndex::load(embeddings, &index_dir)?;
             Ok(SearchIndex::Embedding(index))
         }
     }
 }
 
-fn build_keyword_index(text_data_path: &Path, output_path: &Path) -> Result<()> {
-    let text_data = TextData::load(text_data_path).context(format!(
+fn build_keyword_index(base_dir: &Path, text_data_path: &Path, output_path: &Path) -> Result<()> {
+    let text_data_path = base_dir.join(text_data_path);
+    let output_path = base_dir.join(output_path);
+
+    let text_data = TextData::load(&text_data_path).context(format!(
         "Failed to load text data from: {}",
         text_data_path.display()
     ))?;
@@ -100,13 +114,16 @@ fn build_keyword_index(text_data_path: &Path, output_path: &Path) -> Result<()> 
         text_data.total_fields()
     );
 
-    KeywordIndex::build(&text_data, output_path, &())?;
+    KeywordIndex::build(&text_data, &output_path, &())?;
 
     Ok(())
 }
 
-fn build_full_text_index(text_data_path: &Path, output_path: &Path) -> Result<()> {
-    let text_data = TextData::load(text_data_path).context(format!(
+fn build_full_text_index(base_dir: &Path, text_data_path: &Path, output_path: &Path) -> Result<()> {
+    let text_data_path = base_dir.join(text_data_path);
+    let output_path = base_dir.join(output_path);
+
+    let text_data = TextData::load(&text_data_path).context(format!(
         "Failed to load text data from: {}",
         text_data_path.display()
     ))?;
@@ -117,19 +134,24 @@ fn build_full_text_index(text_data_path: &Path, output_path: &Path) -> Result<()
         text_data.total_fields()
     );
 
-    FullTextIndex::build(&text_data, output_path, &())?;
+    FullTextIndex::build(&text_data, &output_path, &())?;
 
     Ok(())
 }
 
 fn build_text_embedding_index(
+    base_dir: &Path,
     text_data_path: &Path,
     embedding_data_path: &Path,
     params: &EmbeddingIndexParams,
     output_path: &Path,
 ) -> Result<()> {
-    let text_data = TextData::load(text_data_path).context("Failed to load text data")?;
-    let text_embeddings = TextEmbeddings::load(text_data, embedding_data_path)
+    let text_data_path = base_dir.join(text_data_path);
+    let embedding_data_path = base_dir.join(embedding_data_path);
+    let output_path = base_dir.join(output_path);
+
+    let text_data = TextData::load(&text_data_path).context("Failed to load text data")?;
+    let text_embeddings = TextEmbeddings::load(text_data, &embedding_data_path)
         .context("Failed to load text embeddings")?;
 
     info!(
@@ -144,17 +166,21 @@ fn build_text_embedding_index(
         text_embeddings.num_dimensions()
     );
 
-    TextEmbeddingIndex::build(&text_embeddings, output_path, params)?;
+    TextEmbeddingIndex::build(&text_embeddings, &output_path, params)?;
 
     Ok(())
 }
 
 fn build_embedding_index(
+    base_dir: &Path,
     embedding_data_path: &Path,
     params: &EmbeddingIndexParams,
     output_path: &Path,
 ) -> Result<()> {
-    let embeddings = Embeddings::load(embedding_data_path).context(format!(
+    let embedding_data_path = base_dir.join(embedding_data_path);
+    let output_path = base_dir.join(output_path);
+
+    let embeddings = Embeddings::load(&embedding_data_path).context(format!(
         "Failed to load embeddings from: {}",
         embedding_data_path.display()
     ))?;
@@ -166,7 +192,7 @@ fn build_embedding_index(
         embeddings.num_dimensions()
     );
 
-    EmbeddingIndex::build(&embeddings, output_path, params)?;
+    EmbeddingIndex::build(&embeddings, &output_path, params)?;
 
     Ok(())
 }

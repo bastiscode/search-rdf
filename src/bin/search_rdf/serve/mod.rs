@@ -10,7 +10,7 @@ use axum::{
     routing::{get, post},
 };
 use log::info;
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -22,8 +22,13 @@ use self::search::search;
 use self::sparql::{qlproxy, service};
 use self::types::AppState;
 
-pub async fn run(config_path: &str) -> Result<()> {
+pub async fn run(config_path: &Path) -> Result<()> {
     let config = Config::load(config_path)?;
+    let config_dir = config_path
+        .parent()
+        .ok_or_else(|| anyhow!("Failed to get config directory"))?;
+
+    info!("Starting server from {}...", config_path.display());
 
     let Some(server) = &config.server else {
         info!("No server configuration found.");
@@ -75,7 +80,7 @@ pub async fn run(config_path: &str) -> Result<()> {
             index_to_model.insert(name.to_string(), model_config.name.clone());
         }
 
-        let search_index = load_index(&index_config.index_type, &index_config.output)?;
+        let search_index = load_index(config_dir, &index_config.index_type, &index_config.output)?;
         info!("[OK] {}", name);
 
         search_indices.insert(name.to_string(), search_index);

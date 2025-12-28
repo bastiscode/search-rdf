@@ -13,8 +13,13 @@ use std::path::Path;
 
 use crate::search_rdf::config::{Config, DataType, TextSource};
 
-pub fn run(config_path: &str, force: bool) -> Result<()> {
+pub fn run(config_path: &Path, force: bool) -> Result<()> {
     let config = Config::load(config_path)?;
+    let config_dir = config_path
+        .parent()
+        .expect("Failed to get config directory");
+
+    info!("Building datasets in {}", config_dir.display());
 
     let Some(datasets) = config.datasets else {
         info!("No datasets defined in configuration.");
@@ -24,7 +29,7 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
     info!("Building {} datasets...", datasets.len());
 
     for dataset in &datasets {
-        if dataset.output.exists() && !force {
+        if config_dir.join(&dataset.output).exists() && !force {
             info!(
                 "[SKIP] {} (output exists, use --force to rebuild)",
                 dataset.name
@@ -35,7 +40,7 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
         info!("[BUILD] {}...", dataset.name);
         match &dataset.data_type {
             DataType::Text { source } => {
-                build_text_data(source, &dataset.output)?;
+                build_text_data(config_dir, source, &dataset.output)?;
             }
         }
 
@@ -45,7 +50,7 @@ pub fn run(config_path: &str, force: bool) -> Result<()> {
     Ok(())
 }
 
-fn build_text_data(source: &TextSource, output: &Path) -> Result<()> {
+fn build_text_data(base_dir: &Path, source: &TextSource, output: &Path) -> Result<()> {
     // Get iterator of TextItems based on source type
     let items: Box<dyn Iterator<Item = Result<TextItem>>> = match source {
         TextSource::Jsonl { path } => {
@@ -78,7 +83,7 @@ fn build_text_data(source: &TextSource, output: &Path) -> Result<()> {
     info!("Building text dataset...");
 
     // Build TextData
-    TextData::build(items, output)?;
+    TextData::build(items, &base_dir.join(output))?;
 
     Ok(())
 }

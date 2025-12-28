@@ -3,10 +3,9 @@ use crate::data::text::embedding::TextEmbeddings;
 use crate::data::{DataSource, Precision};
 use crate::index::embedding::{Metadata, binary_quantization};
 use crate::index::{EmbeddingIndexParams, Match, Search, SearchParams};
-use crate::utils::load_u32_vec;
 use crate::utils::{load_json, write_json};
+use crate::utils::{load_u32_vec, progress_bar};
 use anyhow::{Result, anyhow};
-use log::info;
 use ordered_float::OrderedFloat;
 use std::cmp::Reverse;
 use std::fs::{File, create_dir_all};
@@ -199,10 +198,9 @@ impl Search for TextEmbeddingIndex {
         let index = Index::new(&options)?;
 
         let total_fields = data.total_fields();
-        index.reserve(total_fields as usize)?;
+        index.reserve_capacity_and_threads(total_fields as usize, num_cpus::get_physical())?;
 
-        // every 5% or every 100,000 fields, whichever is smaller
-        let log_every = (total_fields / 20).clamp(1, 100_000);
+        let pb = progress_bar("Building text embedding index", Some(total_fields as u64))?;
 
         let mut field_to_data_file =
             BufWriter::new(File::create(index_dir.join("index.field-to-data"))?);
@@ -223,18 +221,11 @@ impl Search for TextEmbeddingIndex {
                 field_id += 1;
                 field_to_data_file.write_all(&id.to_le_bytes())?;
 
-                if field_id.is_multiple_of(log_every) {
-                    let percentage = (field_id as f64 / total_fields as f64) * 100.0;
-                    info!(
-                        "Indexed {} / {} embeddings ({:.1}%) from {} items",
-                        field_id,
-                        total_fields,
-                        percentage,
-                        id + 1
-                    );
-                }
+                pb.inc(1);
             }
         }
+
+        pb.finish_with_message("Text embedding index built");
 
         // Save the index
         let index_file = index_dir.join("index.usearch");

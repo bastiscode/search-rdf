@@ -10,10 +10,9 @@ use std::{
 use crate::{
     data::{DataSource, TextData},
     index::{Match, Search, SearchParams},
-    utils::load_u32_vec,
+    utils::{load_u32_vec, progress_bar},
 };
 use anyhow::{Result, anyhow};
-use log::info;
 use ordered_float::OrderedFloat;
 use tantivy::Index;
 use tantivy::query::QueryParser;
@@ -90,9 +89,8 @@ impl Search for FullTextIndex {
         let text_field = schema.get_field("text")?;
         let field_id_field = schema.get_field("field_id")?;
 
-        // Log every 5% or every 100,000 embeddings, whichever is smaller
         let total_fields = data.total_fields();
-        let log_every = (total_fields / 20).clamp(1, 100_000);
+        let pb = progress_bar("Building full-text index", Some(total_fields as u64))?;
 
         let mut field_to_data_file =
             BufWriter::new(File::create(index_dir.join("index.field-to-data"))?);
@@ -111,18 +109,11 @@ impl Search for FullTextIndex {
                 field_id += 1;
                 field_to_data_file.write_all(&id.to_le_bytes())?;
 
-                if field_id.is_multiple_of(log_every) {
-                    let percentage = (field_id as f64 / total_fields as f64) * 100.0;
-                    info!(
-                        "Indexed {} / {} embeddings ({:.1}%) from {} items",
-                        field_id,
-                        total_fields,
-                        percentage,
-                        id + 1
-                    );
-                }
+                pb.inc(1);
             }
         }
+
+        pb.finish_with_message("Full-text index built");
 
         index_writer.commit()?;
 

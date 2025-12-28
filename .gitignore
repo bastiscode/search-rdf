@@ -139,7 +139,8 @@ dmypy.json
 
 # Custom
 
-/python/search_index/_internal*.so
+/data
+/python/search_rdf/_internal.abi3.so
 /benches/data.tsv
 /benches/data/
 /benches/index/

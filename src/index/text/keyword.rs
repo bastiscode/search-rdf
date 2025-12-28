@@ -1,10 +1,9 @@
 use crate::data::DataSource;
 use crate::data::text::TextData;
 use crate::index::{Match, Search, SearchParams};
-use crate::utils::{load_u32_vec, load_usize_vec_from_u64};
+use crate::utils::{load_u32_vec, load_usize_vec_from_u64, progress_bar};
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
-use log::info;
 use memmap2::Mmap;
 use ordered_float::OrderedFloat;
 use pathfinding::{kuhn_munkres::kuhn_munkres, matrix::Matrix};
@@ -525,8 +524,7 @@ impl Search for KeywordIndex {
         let mut lengths_file = BufWriter::new(File::create(index_dir.join("index.lengths"))?);
 
         let total_fields = data.total_fields();
-        // every 5% or every 100,000 fields, whichever is smaller
-        let log_every = (total_fields / 20).clamp(1, 100_000);
+        let pb = progress_bar("Building keyword index", Some(total_fields as u64))?;
 
         let mut field_id = 0;
         for (id, fields) in data.items() {
@@ -544,18 +542,11 @@ impl Search for KeywordIndex {
                 field_to_data_file.write_all(&id.to_le_bytes())?;
                 lengths_file.write_all(&length.to_le_bytes())?;
 
-                if field_id.is_multiple_of(log_every) {
-                    let percentage = (field_id as f64 / total_fields as f64) * 100.0;
-                    info!(
-                        "Indexed {} / {} fields ({:.1}%) from {} items",
-                        field_id,
-                        total_fields,
-                        percentage,
-                        id + 1
-                    );
-                }
+                pb.inc(1);
             }
         }
+
+        pb.finish_with_message("Keyword index built");
 
         // first sort by key to have them in lexicographical order
         let mut keyword_file = BufWriter::new(File::create(index_dir.join("index.keywords"))?);

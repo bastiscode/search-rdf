@@ -2,13 +2,13 @@ pub mod embedding;
 pub mod item;
 pub mod python;
 pub use embedding::TextEmbeddings;
+use log::info;
 
 use crate::data::map::{OrderedDataMap, TrieMap};
 use crate::data::text::item::TextItem;
 
 use super::DataSource;
 use anyhow::{Result, anyhow};
-use log::info;
 use memmap2::Mmap;
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write};
@@ -44,6 +44,9 @@ impl TextData {
         let mut identifier_map = TrieMap::new();
         let mut data_map = OrderedDataMap::new();
 
+        let log_every = 1_000_000;
+
+        let mut total_fields = 0u64;
         for (id, item) in items.into_iter().enumerate() {
             let item = item?;
             let id = id as u32;
@@ -57,13 +60,9 @@ impl TextData {
             identifier_map.add(&item.identifier, id)?;
             data_map.add(encoded.len(), item.num_fields())?;
 
-            // Log progress every 1M items
-            if (id + 1).is_multiple_of(1_000_000) {
-                info!(
-                    "Processed {} items, {} fields",
-                    id + 1,
-                    data_map.total_count
-                );
+            total_fields += item.num_fields() as u64;
+            if (id + 1).is_multiple_of(log_every) {
+                info!("  Processed {} items and {} fields", id + 1, total_fields)
             }
         }
 

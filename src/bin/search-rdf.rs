@@ -1,5 +1,7 @@
 mod search_rdf;
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use log::{LevelFilter, info};
@@ -14,7 +16,7 @@ struct Cli {
 
     /// Path to configuration file (used when no subcommand is specified)
     #[arg(global = true)]
-    config: Option<String>,
+    config: Option<PathBuf>,
 
     /// Force rebuild even if output exists (used when no subcommand is specified)
     #[arg(long, global = true)]
@@ -34,7 +36,7 @@ enum Commands {
     /// Download and prepare data
     Data {
         /// Path to configuration file
-        config: String,
+        config: PathBuf,
         /// Force rebuild even if output exists
         #[arg(long)]
         force: bool,
@@ -43,7 +45,7 @@ enum Commands {
     /// Generate embeddings for data
     Embed {
         /// Path to configuration file
-        config: String,
+        config: PathBuf,
         /// Force rebuild even if output exists
         #[arg(long)]
         force: bool,
@@ -52,7 +54,7 @@ enum Commands {
     /// Build search indices
     Index {
         /// Path to configuration file
-        config: String,
+        config: PathBuf,
         /// Force rebuild even if output exists
         #[arg(long)]
         force: bool,
@@ -61,7 +63,7 @@ enum Commands {
     /// Serve indices via HTTP
     Serve {
         /// Path to configuration file
-        config: String,
+        config: PathBuf,
     },
 }
 

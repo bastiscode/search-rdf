@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use log::warn;
 use oxrdf::{
-    vocab::{rdf, xsd},
     Term,
+    vocab::{rdf, xsd},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -320,10 +320,12 @@ mod tests {
                 .collect();
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Expected exactly 2 variables"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Expected exactly 2 variables")
+        );
     }
 
     #[test]
@@ -347,10 +349,12 @@ mod tests {
                 .collect();
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Expected first variable to be an IRI"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Expected first variable to be an IRI")
+        );
     }
 
     #[test]

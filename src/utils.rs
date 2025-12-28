@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Result, anyhow};
+use indicatif::{ProgressBar, ProgressStyle};
 use memmap2::Mmap;
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -73,6 +74,23 @@ pub fn load_usize_vec_from_u64(path: &Path) -> Result<Vec<usize>> {
         .iter()
         .map(|&v| usize::try_from(v).map_err(|e| anyhow!("failed to convert u64 to usize: {}", e)))
         .collect::<Result<_>>()
+}
+
+pub fn progress_bar(message: &str, total: Option<u64>) -> Result<ProgressBar> {
+    let pb = if let Some(total) = total {
+        ProgressBar::new(total).with_style(
+            ProgressStyle::with_template(
+                "{msg} [{wide_bar:.cyan/blue}] ({pos:.}/{len:.}, TIME {elapsed}, ETA {eta})",
+            )?
+            .progress_chars("#>-"),
+        )
+    } else {
+        ProgressBar::new_spinner().with_style(
+            ProgressStyle::with_template("{msg} {spinner} TIME {elapsed}")?.tick_chars("/|\\- "),
+        )
+    };
+    pb.set_message(message.to_string());
+    Ok(pb)
 }
 
 #[cfg(test)]

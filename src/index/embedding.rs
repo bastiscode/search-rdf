@@ -1,5 +1,6 @@
 use crate::data::Embeddings;
 use crate::index::SearchParams;
+use crate::utils::progress_bar;
 use crate::{
     data::{
         DataSource,
@@ -8,7 +9,6 @@ use crate::{
     index::{Match, Search},
 };
 use anyhow::{Result, anyhow};
-use log::info;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
@@ -339,14 +339,12 @@ impl Search for EmbeddingIndex {
         let index = Index::new(&options)?;
 
         let total_fields = data.total_fields();
-        index.reserve(total_fields as usize)?;
+        index.reserve_capacity_and_threads(total_fields as usize, num_cpus::get_physical())?;
 
-        // Log every 5% or every 100,000 embeddings, whichever is smaller
-        let log_every = (total_fields / 20).clamp(1, 100_000);
+        let pb = progress_bar("Building embedding index", Some(total_fields as u64))?;
 
         // Add all embeddings to the index using their IDs as keys (not indices)
         // Multiple embeddings can have the same ID
-        let mut field_count = 0u32;
         for (id, embeddings) in data.items() {
             for emb in embeddings {
                 if params.precision == Precision::Binary {
@@ -355,20 +353,12 @@ impl Search for EmbeddingIndex {
                 } else {
                     index.add(id as u64, emb)?;
                 }
-                field_count += 1;
 
-                if field_count.is_multiple_of(log_every) {
-                    let percentage = (field_count as f64 / total_fields as f64) * 100.0;
-                    info!(
-                        "Indexed {} / {} embeddings ({:.1}%) from {} items",
-                        field_count,
-                        total_fields,
-                        percentage,
-                        id + 1
-                    );
-                }
+                pb.inc(1);
             }
         }
+
+        pb.finish_with_message("Embedding index built");
 
         // Save the index
         let index_file = index_dir.join("index.usearch");
