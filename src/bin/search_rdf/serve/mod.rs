@@ -95,7 +95,7 @@ pub async fn run(config_path: &Path) -> Result<()> {
         .route("/search/{index}", post(search))
         .route("/service/{index}", post(service))
         .route("/qlproxy/{index}", post(qlproxy))
-        .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100 MB
+        .layer(DefaultBodyLimit::max(1024 * 1024 * 1024)) // 1 GB
         .with_state(state);
 
     // Add CORS if enabled

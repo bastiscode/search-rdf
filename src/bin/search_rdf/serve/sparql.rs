@@ -7,6 +7,7 @@ use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use log::info;
+use oxrdf::vocab::xsd;
 use oxrdf::{Literal, Term, Variable};
 use search_rdf::index::{Search, SearchIndex, SearchParams};
 use serde::Deserialize;
@@ -44,25 +45,31 @@ fn search_match_to_solution(
     search_match: SearchMatch,
     variables: &[Variable],
     row: Term,
+    rank: usize,
 ) -> Result<QuerySolution> {
-    let mut values = Vec::new();
-
-    // Always include row variable
-    values.push(Some(row));
-
-    // Add output variables based on params
-    values.push(Some(Term::Literal(Literal::new_simple_literal(
-        search_match.id.to_string(),
-    ))));
-
-    values.push(Some(Term::Literal(Literal::new_simple_literal(
-        search_match.score.to_string(),
-    ))));
+    let mut values = vec![
+        // row
+        Some(row),
+        // rank
+        Some(Term::Literal(Literal::new_typed_literal(
+            rank.to_string(),
+            xsd::INTEGER,
+        ))),
+        // id
+        Some(Term::Literal(Literal::new_typed_literal(
+            search_match.id.to_string(),
+            xsd::INTEGER,
+        ))),
+        // score
+        Some(Term::Literal(Literal::new_typed_literal(
+            search_match.score.to_string(),
+            xsd::FLOAT,
+        ))),
+    ];
 
     // Extract identifier and field from MatchInfo if available
     if let MatchInfo::Text { identifier, field } = search_match.info {
         values.push(Some(Term::Literal(Literal::new_simple_literal(identifier))));
-
         values.push(Some(Term::Literal(Literal::new_simple_literal(field))));
     }
 
@@ -226,6 +233,7 @@ pub async fn qlproxy(
     // Determine output variable names
     let variables = vec![
         Variable::new_unchecked(params.rowvar),
+        Variable::new_unchecked("rank"),
         Variable::new_unchecked("id"),
         Variable::new_unchecked("score"),
         Variable::new_unchecked("identifier"),
@@ -237,7 +245,7 @@ pub async fn qlproxy(
         .serialize_solutions_to_writer(&mut response_buffer, variables.clone())
         .map_err(|e| anyhow!("Failed to create serializer: {}", e))?;
 
-    for search_match in matches.into_iter().flatten() {
+    for (rank, search_match) in matches.into_iter().flatten().enumerate() {
         // Get the row binding from id_to_row map
         let row = id_to_row.get(&search_match.id).cloned().ok_or_else(|| {
             anyhow!(
@@ -246,7 +254,7 @@ pub async fn qlproxy(
             )
         })?;
 
-        let solution = search_match_to_solution(search_match, &variables, row)?;
+        let solution = search_match_to_solution(search_match, &variables, row, rank + 1)?;
 
         serializer
             .serialize(&solution)
