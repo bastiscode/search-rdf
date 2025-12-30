@@ -8,6 +8,7 @@ use search_rdf::data::text::item::sparql::{
     stream_text_items_from_sparql_result_file,
 };
 use std::collections::HashMap;
+use std::fs::read_to_string;
 use std::io::Read;
 use std::path::Path;
 
@@ -67,11 +68,22 @@ fn build_text_data(base_dir: &Path, source: &TextSource, output: &Path) -> Resul
         TextSource::SparqlQuery {
             endpoint,
             query,
+            path,
             format,
             headers,
         } => {
+            let query = match (query, path) {
+                (Some(q), None) => q.clone(),
+                (None, Some(p)) => read_to_string(p)?,
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "Either 'query' or 'path' must be provided, but not both."
+                    ));
+                }
+            };
+
             // Execute SPARQL query
-            let response = execute_sparql_query(endpoint, query, *format, headers.as_ref())?;
+            let response = execute_sparql_query(endpoint, &query, *format, headers.as_ref())?;
 
             // Create iterator from response
             let items = stream_text_items_from_sparql_result(response, *format)?;
@@ -93,7 +105,7 @@ pub fn execute_sparql_query(
     query: &str,
     format: SPARQLResultFormat,
     headers: Option<&HashMap<String, String>>,
-) -> Result<impl Read> {
+) -> Result<impl Read + use<>> {
     info!(
         "Executing SPARQL query against {}:\n{}",
         endpoint,

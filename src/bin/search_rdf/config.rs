@@ -42,7 +42,8 @@ pub enum TextSource {
     #[serde(rename = "sparql-query")]
     SparqlQuery {
         endpoint: String,
-        query: String,
+        query: Option<String>,
+        path: Option<PathBuf>,
         format: SPARQLResultFormat,
         headers: Option<HashMap<String, String>>,
     },
@@ -275,11 +276,13 @@ server:
                 TextSource::SparqlQuery {
                     endpoint,
                     query,
+                    path,
                     format,
                     headers,
                 } => {
                     assert_eq!(endpoint, "https://query.wikidata.org/sparql");
-                    assert!(query.contains("SELECT ?item ?label"));
+                    assert!(query.as_ref().unwrap().contains("SELECT ?item ?label"));
+                    assert!(path.is_none());
                     assert_eq!(format, &SPARQLResultFormat::JSON);
                     assert!(headers.is_none());
                 }

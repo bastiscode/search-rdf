@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Result, anyhow};
 use axum::body::Bytes;
@@ -156,6 +157,7 @@ pub async fn qlproxy(
         ));
     };
 
+    let start = Instant::now();
     // Parse input bindings - build id_to_row mapping
     let mut id_to_row: HashMap<u32, Term> = HashMap::new();
     for solution_result in solutions.into_iter() {
@@ -203,7 +205,11 @@ pub async fn qlproxy(
         }
     }
 
-    info!("Filtered to {} identifiers for search", id_to_row.len());
+    info!(
+        "Filtered to {} identifiers for search in {}ms",
+        id_to_row.len(),
+        start.elapsed().as_millis()
+    );
 
     // Build search params
     let mut search_params = SearchParams::default();
@@ -226,9 +232,12 @@ pub async fn qlproxy(
     let filter = move |id| id_to_row_clone.contains_key(&id);
 
     // Always perform filtered search
+    let start = Instant::now();
     let matches =
         perform_text_search_with_filter(index, vec![params.query], search_params, model, filter)
             .await?;
+
+    info!("Search completed in {}ms", start.elapsed().as_millis());
 
     // Determine output variable names
     let variables = vec![
