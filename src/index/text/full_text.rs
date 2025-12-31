@@ -43,8 +43,6 @@ pub struct FullTextIndex {
     inner: Arc<Inner>,
 }
 
-pub struct BuildParams {}
-
 impl FullTextIndex {
     fn field_to_column(&self, field_id: u32) -> usize {
         let field_to_data = &self.inner.field_to_data;
@@ -63,10 +61,9 @@ impl FullTextIndex {
 
 impl Search for FullTextIndex {
     type Data = TextData;
-
     type Query<'e> = &'e str;
-
     type BuildParams = ();
+    type SearchParams = SearchParams;
 
     fn build(data: &Self::Data, index_dir: &Path, _params: &Self::BuildParams) -> Result<()>
     where
@@ -145,7 +142,7 @@ impl Search for FullTextIndex {
         })
     }
 
-    fn search(&self, query: Self::Query<'_>, params: &SearchParams) -> Result<Vec<Match>> {
+    fn search(&self, query: Self::Query<'_>, params: &Self::SearchParams) -> Result<Vec<Match>> {
         let index = &self.inner.index;
         let schema = index.schema();
         let field_id_field = schema.get_field("field_id")?;
@@ -203,7 +200,7 @@ impl Search for FullTextIndex {
     fn search_with_filter<F>(
         &self,
         _query: Self::Query<'_>,
-        _params: &SearchParams,
+        _params: &Self::SearchParams,
         _filter: F,
     ) -> Result<Vec<Match>>
     where

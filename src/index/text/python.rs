@@ -7,7 +7,7 @@ use crate::index::Match;
 use crate::index::Search;
 use crate::index::SearchParams;
 use crate::index::embedding::{EmbeddingIndexParams, Metric};
-use crate::index::text::embedding::{Query, TextEmbeddingIndex as RustTextEmbeddingIndex};
+use crate::index::text::embedding::TextEmbeddingIndex as RustTextEmbeddingIndex;
 use crate::index::text::keyword::KeywordIndex as RustKeywordIndex;
 use anyhow::{Result, anyhow};
 use pyo3::prelude::*;
@@ -125,10 +125,10 @@ impl TextEmbeddingIndex {
         Ok(TextEmbeddingIndex { inner })
     }
 
-    #[pyo3(signature = (embedding, k=100, exact=false, min_score=None, allow_ids=None))]
+    #[pyo3(signature = (query, k=100, exact=false, min_score=None, allow_ids=None))]
     pub fn search(
         &self,
-        embedding: Embedding,
+        query: Embedding,
         k: usize,
         exact: bool,
         min_score: Option<f32>,
@@ -139,13 +139,11 @@ impl TextEmbeddingIndex {
             params = params.with_min_score(min_score);
         }
 
-        let query = Query::Embedding(embedding.as_ref());
-
         if let Some(ids) = allow_ids {
             self.inner
-                .search_with_filter(query, &params, move |id| ids.contains(&id))
+                .search_with_filter(&query, &params, move |id| ids.contains(&id))
         } else {
-            self.inner.search(query, &params)
+            self.inner.search(&query, &params)
         }
     }
 }

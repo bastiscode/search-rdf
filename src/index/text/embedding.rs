@@ -166,15 +166,11 @@ impl TextEmbeddingIndex {
     }
 }
 
-pub enum Query<'e> {
-    String(&'e str),
-    Embedding(EmbeddingRef<'e>),
-}
-
 impl Search for TextEmbeddingIndex {
     type Data = TextEmbeddings;
-    type Query<'q> = Query<'q>;
+    type Query<'q> = EmbeddingRef<'q>;
     type BuildParams = EmbeddingIndexParams;
+    type SearchParams = SearchParams;
 
     fn build(data: &Self::Data, index_dir: &Path, params: &Self::BuildParams) -> Result<()> {
         // Validate metric is compatible with precision
@@ -280,28 +276,20 @@ impl Search for TextEmbeddingIndex {
         "text-embedding"
     }
 
-    fn search(&self, query: Self::Query<'_>, params: &SearchParams) -> Result<Vec<Match>> {
-        match query {
-            Query::Embedding(embedding) => {
-                self.search_internal(embedding, params, None::<fn(u32) -> bool>)
-            }
-            Query::String(_) => Err(anyhow!("String queries are not supported yet")),
-        }
+    fn search(&self, query: Self::Query<'_>, params: &Self::SearchParams) -> Result<Vec<Match>> {
+        self.search_internal(query, params, None::<fn(u32) -> bool>)
     }
 
     fn search_with_filter<F>(
         &self,
         query: Self::Query<'_>,
-        params: &SearchParams,
+        params: &Self::SearchParams,
         filter: F,
     ) -> Result<Vec<Match>>
     where
         F: Fn(u32) -> bool,
     {
-        match query {
-            Query::Embedding(embedding) => self.search_internal(embedding, params, Some(filter)),
-            Query::String(_) => Err(anyhow!("String queries are not supported yet")),
-        }
+        self.search_internal(query, params, Some(filter))
     }
 }
 
@@ -433,7 +421,7 @@ mod tests {
                 normalize(&mut query);
 
                 let results = index
-                    .search(Query::Embedding(&query), &SearchParams::default())
+                    .search(&query, &SearchParams::default())
                     .expect("Failed to search");
 
                 // Should find Q1 (Cat) as top result
@@ -489,7 +477,7 @@ mod tests {
 
                 // Test search with filter - exclude Q1
                 let results_filtered = index
-                    .search_with_filter(Query::Embedding(&query), &SearchParams::default(), |id| {
+                    .search_with_filter(&query, &SearchParams::default(), |id| {
                         id != 0
                     })
                     .expect("Failed to search with filter");
@@ -557,7 +545,7 @@ mod tests {
             let query_ip = vec![1.0, 0.0, 0.0, 0.0]; // Unnormalized query
 
             let results = index
-                .search(Query::Embedding(&query_ip), &SearchParams::default())
+                .search(&query_ip, &SearchParams::default())
                 .expect("Failed to search");
 
             assert!(
@@ -623,7 +611,7 @@ mod tests {
         query_hamming.extend(vec![0.0; 16]);
 
         let results = index_hamming
-            .search(Query::Embedding(&query_hamming), &SearchParams::default())
+            .search(&query_hamming, &SearchParams::default())
             .expect("Failed to search");
 
         assert!(!results.is_empty(), "No results for Hamming Binary");
@@ -706,7 +694,7 @@ mod tests {
         normalize(&mut query1);
 
         let results1 = index
-            .search(Query::Embedding(&query1), &SearchParams::default())
+            .search(&query1, &SearchParams::default())
             .expect("Failed to search");
 
         assert!(!results1.is_empty(), "No results for query1");
@@ -732,7 +720,7 @@ mod tests {
         normalize(&mut query2);
 
         let results2 = index
-            .search(Query::Embedding(&query2), &SearchParams::default())
+            .search(&query2, &SearchParams::default())
             .expect("Failed to search");
 
         assert!(!results2.is_empty(), "No results for query2");
@@ -757,7 +745,7 @@ mod tests {
         normalize(&mut query3);
 
         let results3 = index
-            .search(Query::Embedding(&query3), &SearchParams::default())
+            .search(&query3, &SearchParams::default())
             .expect("Failed to search");
 
         assert!(!results3.is_empty(), "No results for query3");
@@ -782,7 +770,7 @@ mod tests {
         normalize(&mut query4);
 
         let results4 = index
-            .search(Query::Embedding(&query4), &SearchParams::default())
+            .search(&query4, &SearchParams::default())
             .expect("Failed to search");
 
         assert!(!results4.is_empty(), "No results for query4");

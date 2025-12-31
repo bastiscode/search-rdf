@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use search_rdf::{
     data::{DataSource, TextData},
-    index::text::embedding::Query,
     index::{Match, Search, SearchIndex, SearchParams},
     model::{Embed, EmbeddingModel},
 };
@@ -159,7 +158,7 @@ pub async fn perform_text_search(
                 EmbeddingModel::Vllm(m) => m.embed(&text, model_params)?,
             };
             search_parallel(embeddings, move |emb| {
-                let matches = index.search(Query::Embedding(&emb), &params)?;
+                let matches = index.search(&emb, &params)?;
                 convert_to_text_search_matches(matches, index.data().text_data())
             })
             .await
@@ -205,8 +204,7 @@ pub async fn perform_text_search_with_filter(
                 EmbeddingModel::Vllm(m) => m.embed(&text, model_params)?,
             };
             search_parallel(embeddings, move |emb| {
-                let matches =
-                    index.search_with_filter(Query::Embedding(&emb), &params, filter.clone())?;
+                let matches = index.search_with_filter(&emb, &params, filter.clone())?;
                 convert_to_text_search_matches(matches, index.data().text_data())
             })
             .await
@@ -230,7 +228,7 @@ pub async fn perform_search(
         (index, QueryType::Text(text)) => perform_text_search(index, text, params, model).await,
         (SearchIndex::TextEmbedding(index), QueryType::Embedding(embedding)) => {
             search_parallel(embedding, move |emb| {
-                let matches = index.search(Query::Embedding(&emb), &params)?;
+                let matches = index.search(&emb, &params)?;
                 convert_to_text_search_matches(matches, index.data().text_data())
             })
             .await

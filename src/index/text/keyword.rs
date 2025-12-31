@@ -513,6 +513,7 @@ impl Search for KeywordIndex {
     type Data = TextData;
     type Query<'q> = &'q str;
     type BuildParams = ();
+    type SearchParams = SearchParams;
 
     fn build(data: &Self::Data, index_dir: &Path, _params: &Self::BuildParams) -> Result<()> {
         create_dir_all(index_dir)?;
@@ -609,14 +610,14 @@ impl Search for KeywordIndex {
         "keyword"
     }
 
-    fn search(&self, query: Self::Query<'_>, params: &SearchParams) -> Result<Vec<Match>> {
+    fn search(&self, query: Self::Query<'_>, params: &Self::SearchParams) -> Result<Vec<Match>> {
         self.search_internal(query, params, None::<fn(u32) -> bool>)
     }
 
     fn search_with_filter<F>(
         &self,
         query: Self::Query<'_>,
-        params: &SearchParams,
+        params: &Self::SearchParams,
         filter: F,
     ) -> Result<Vec<Match>>
     where
