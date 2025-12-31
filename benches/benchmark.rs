@@ -1,57 +1,38 @@
 use std::{
     fs::{File, create_dir_all},
-    io::{BufRead, BufReader, BufWriter, Write},
+    io::{BufRead, BufReader},
     path::Path,
 };
 
+use anyhow::Result;
 use criterion::{Criterion, criterion_group, criterion_main};
 
 use search_rdf::{
     data::{
         DataSource, TextData,
         map::{OrderedDataMap, TrieMap},
+        text::item::TextItem,
     },
     index::{Search, SearchParams, keyword::KeywordIndex},
 };
 
-fn convert_tsv_to_binary(tsv_file: &Path, data_dir: &Path) -> std::io::Result<()> {
-    create_dir_all(data_dir)?;
-    let data_file = data_dir.join("data");
-    let mut out = BufWriter::new(File::create(&data_file)?);
-
+fn read_tsv_items(tsv_file: &Path) -> Result<Vec<TextItem>> {
     let file = File::open(tsv_file)?;
     let reader = BufReader::new(file);
 
+    let mut items = Vec::new();
     for line in reader.lines() {
         let line = line?;
         let mut parts = line.split('\t');
 
         if let Some(identifier) = parts.next() {
-            let fields: Vec<_> = parts.collect();
-
-            // Write identifier length (u16)
-            let key_bytes = identifier.as_bytes();
-            out.write_all(&(key_bytes.len() as u16).to_le_bytes())?;
-
-            // Write identifier
-            out.write_all(key_bytes)?;
-
-            // Write number of fields (u16)
-            out.write_all(&(fields.len() as u16).to_le_bytes())?;
-
-            // Write each field
-            for field in fields {
-                // Write field length (u32)
-                let value_bytes = field.as_bytes();
-                out.write_all(&(value_bytes.len() as u32).to_le_bytes())?;
-
-                // Write field value
-                out.write_all(value_bytes)?;
-            }
+            let fields: Vec<String> = parts.map(|s| s.to_string()).collect();
+            let item = TextItem::new(identifier.to_string(), fields)?;
+            items.push(item);
         }
     }
 
-    Ok(())
+    Ok(items)
 }
 
 fn bench_data(c: &mut Criterion) {
@@ -60,16 +41,17 @@ fn bench_data(c: &mut Criterion) {
     let tsv_file = base_dir.join("data.tsv");
     let data_dir = base_dir.join("data");
 
-    // Convert TSV to binary format and build
-    convert_tsv_to_binary(&tsv_file, &data_dir).expect("Failed to convert TSV");
-    TextData::build(&data_dir).expect("Failed to build data");
+    // Read TSV items and build data
+    let items = read_tsv_items(&tsv_file).expect("Failed to read TSV items");
+    TextData::build(items.iter().cloned().map(Ok), &data_dir).expect("Failed to build data");
     let data = TextData::load(&data_dir).expect("Failed to load data");
 
     let mut g = c.benchmark_group("data");
 
     g.bench_function("build_data", |b| {
         b.iter(|| {
-            TextData::build(&data_dir).expect("Failed to build data");
+            TextData::build(items.iter().cloned().map(Ok), &data_dir)
+                .expect("Failed to build data");
         })
     });
 
@@ -144,11 +126,11 @@ fn bench_keyword_index(c: &mut Criterion) {
         tsv_file.display()
     );
 
-    convert_tsv_to_binary(&tsv_file, &data_dir).expect("Failed to convert TSV");
-    TextData::build(&data_dir).expect("Failed to build data");
+    let items = read_tsv_items(&tsv_file).expect("Failed to read TSV items");
+    TextData::build(items.into_iter().map(Ok), &data_dir).expect("Failed to build data");
     let data = TextData::load(&data_dir).expect("Failed to load data");
 
-    KeywordIndex::build(&data, &index_dir, ()).expect("Failed to build index");
+    KeywordIndex::build(&data, &index_dir, &()).expect("Failed to build index");
 
     let index = KeywordIndex::load(data, &index_dir).expect("Failed to load index");
 
@@ -157,7 +139,7 @@ fn bench_keyword_index(c: &mut Criterion) {
     let queries = vec!["the united states", "angela m"];
     let ks = vec![10, 100];
 
-    let filter = |id: u32| id % 2 == 0;
+    let filter = |id: u32| id.is_multiple_of(2);
 
     for query in queries {
         for &k in &ks {
@@ -167,7 +149,7 @@ fn bench_keyword_index(c: &mut Criterion) {
                     |b| {
                         b.iter(|| {
                             let _ = index
-                                .search(query, SearchParams::default().with_k(k).with_exact(exact))
+                                .search(query, &SearchParams::default().with_k(k).with_exact(exact))
                                 .expect("Failed to find matches");
                         })
                     },
@@ -180,7 +162,7 @@ fn bench_keyword_index(c: &mut Criterion) {
                             let _ = index
                                 .search_with_filter(
                                     query,
-                                    SearchParams::default().with_k(k).with_exact(exact),
+                                    &SearchParams::default().with_k(k).with_exact(exact),
                                     filter,
                                 )
                                 .expect("Failed to find matches");

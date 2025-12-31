@@ -7,7 +7,7 @@ pub mod sparql;
 const U16_SIZE: usize = size_of::<u16>();
 const U32_SIZE: usize = size_of::<u32>();
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TextItem {
     pub identifier: String,
     pub fields: Vec<String>,

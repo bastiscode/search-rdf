@@ -141,6 +141,5 @@ dmypy.json
 
 /data
 /python/search_rdf/_internal.abi3.so
-/benches/data.tsv
 /benches/data/
 /benches/index/
