@@ -12,6 +12,7 @@ use oxrdf::vocab::xsd;
 use oxrdf::{Literal, NamedNode, Term, Variable};
 use search_rdf::index::Search;
 use serde::Deserialize;
+use serde_json::json;
 use sparesults::{
     QueryResultsFormat, QueryResultsParser, QueryResultsSerializer, QuerySolution,
     ReaderQueryResultsParserOutput,
@@ -27,20 +28,6 @@ use crate::search_rdf::serve::search::{
 
 use super::search::SearchMatch;
 use super::types::{AppError, AppState};
-
-#[derive(Debug, Deserialize)]
-pub struct QlProxyParams {
-    // Search parameters (query is required)
-    query: String,
-    #[serde(default = "default_rowvar")]
-    rowvar: String,
-    #[serde(flatten)]
-    params: SearchParams,
-}
-
-fn default_rowvar() -> String {
-    "row".to_string()
-}
 
 /// Convert a SearchMatch to SPARQL bindings based on output variable configuration
 /// Returns a tuple of (variables, values) that can be used to create a QuerySolution
@@ -169,6 +156,7 @@ pub async fn service(
     let mut query = None;
     let mut variables = HashMap::new();
     let mut params = HashMap::new();
+    params.insert("type".to_string(), index.index_type().to_string());
 
     for tp in patterns {
         match &tp.subject {
@@ -266,7 +254,7 @@ pub async fn service(
         .collect();
 
     // convert params
-    let params = params.try_into().map_err(|e| {
+    let params = SearchParams::deserialize(json!(params)).map_err(|e| {
         AppError(
             StatusCode::BAD_REQUEST,
             anyhow!("Failed to parse search parameters: {}", e),
@@ -376,6 +364,20 @@ fn serialize_search_matches(
         .map_err(|e| anyhow!("Failed to finish serialization: {}", e))?;
 
     Ok(buffer)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct QlProxyParams {
+    // Search parameters (query is required)
+    query: String,
+    #[serde(default = "default_rowvar")]
+    rowvar: String,
+    #[serde(flatten)]
+    params: SearchParams,
+}
+
+fn default_rowvar() -> String {
+    "row".to_string()
 }
 
 pub async fn qlproxy(

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{Result, anyhow};
 use axum::extract::{Json, Path as AxumPath, State};
 use axum::http::StatusCode;
@@ -10,6 +12,7 @@ use search_rdf::{
     index::{Match, Search},
     model::{Embed, EmbeddingModel},
 };
+use serde_json::{Value, json};
 
 use crate::search_rdf::index::{SearchIndex, SearchParams};
 
@@ -20,7 +23,7 @@ use super::types::{AppError, AppState};
 pub struct SearchRequest {
     query: QueryType,
     #[serde(flatten)]
-    params: SearchParams,
+    params: HashMap<String, Value>,
 }
 
 #[derive(Deserialize)]
@@ -283,7 +286,7 @@ pub async fn perform_search(
 pub async fn search(
     AxumPath(index_name): AxumPath<String>,
     State(state): State<AppState>,
-    Json(req): Json<SearchRequest>,
+    Json(mut req): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, AppError> {
     let index = state
         .inner
@@ -303,7 +306,19 @@ pub async fn search(
         .get(&index_name)
         .and_then(|model_name| state.inner.models.get(model_name));
 
-    let matches = perform_search(index, req.query, req.params, model).await?;
+    // parse params
+    req.params.insert(
+        "type".to_string(),
+        Value::String(index.index_type().to_string()),
+    );
+    let params = SearchParams::deserialize(json!(req.params)).map_err(|e| {
+        AppError(
+            StatusCode::BAD_REQUEST,
+            anyhow!("Failed to parse search parameters: {}", e),
+        )
+    })?;
+
+    let matches = perform_search(index, req.query, params, model).await?;
 
     Ok(Json(SearchResponse { matches }))
 }

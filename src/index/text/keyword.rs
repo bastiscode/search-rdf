@@ -8,6 +8,7 @@ use memmap2::Mmap;
 use ordered_float::OrderedFloat;
 use pathfinding::{kuhn_munkres::kuhn_munkres, matrix::Matrix};
 use serde::Deserialize;
+use serde_aux::prelude::*;
 use std::fs::create_dir_all;
 use std::{
     cmp::{Ordering, Reverse},
@@ -518,11 +519,14 @@ impl KeywordIndex {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct KeywordSearchParams {
-    #[serde(default = "crate::index::default_k")]
+    #[serde(
+        default = "crate::index::default_k",
+        deserialize_with = "deserialize_number_from_string"
+    )]
     pub k: usize,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_option_number_from_string")]
     pub min_score: Option<f32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_bool_from_anything")]
     pub exact: bool,
 }
 

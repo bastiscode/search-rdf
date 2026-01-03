@@ -1,3 +1,4 @@
+use serde_aux::prelude::*;
 use std::{
     cmp::Reverse,
     collections::HashMap,
@@ -62,11 +63,14 @@ impl FullTextIndex {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FullTextSearchParams {
-    #[serde(default = "crate::index::default_k")]
+    #[serde(
+        default = "crate::index::default_k",
+        deserialize_with = "deserialize_number_from_string"
+    )]
     pub k: usize,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_option_number_from_string")]
     pub min_score: Option<f32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_bool_from_anything")]
     pub exact: bool,
 }
 
