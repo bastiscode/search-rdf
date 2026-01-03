@@ -5,9 +5,11 @@ use crate::data::embedding::Embedding;
 use crate::data::text::python::{TextData, TextEmbeddings};
 use crate::index::Match;
 use crate::index::Search;
-use crate::index::SearchParams;
 use crate::index::embedding::{EmbeddingIndexParams, Metric};
-use crate::index::text::embedding::TextEmbeddingIndex as RustTextEmbeddingIndex;
+use crate::index::keyword::KeywordSearchParams;
+use crate::index::text::embedding::{
+    TextEmbeddingIndex as RustTextEmbeddingIndex, TextEmbeddingSearchParams,
+};
 use crate::index::text::keyword::KeywordIndex as RustKeywordIndex;
 use anyhow::{Result, anyhow};
 use pyo3::prelude::*;
@@ -79,10 +81,11 @@ impl KeywordIndex {
         min_score: Option<f32>,
         allow_ids: Option<HashSet<u32>>,
     ) -> Result<Vec<Match>> {
-        let mut params = SearchParams::default().with_k(k).with_exact(exact);
-        if let Some(min_score) = min_score {
-            params = params.with_min_score(min_score);
-        }
+        let params = KeywordSearchParams {
+            k,
+            exact,
+            min_score,
+        };
 
         if let Some(ids) = allow_ids {
             self.inner
@@ -134,10 +137,11 @@ impl TextEmbeddingIndex {
         min_score: Option<f32>,
         allow_ids: Option<HashSet<u32>>,
     ) -> Result<Vec<Match>> {
-        let mut params = SearchParams::default().with_k(k).with_exact(exact);
-        if let Some(min_score) = min_score {
-            params = params.with_min_score(min_score);
-        }
+        let params = TextEmbeddingSearchParams {
+            k,
+            exact,
+            min_score,
+        };
 
         if let Some(ids) = allow_ids {
             self.inner

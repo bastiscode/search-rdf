@@ -2,7 +2,6 @@ pub mod embedding;
 pub mod text;
 
 use crate::data::DataSource;
-use crate::index::text::FullTextIndex;
 use anyhow::Result;
 use pyo3::IntoPyObject;
 use std::path::Path;
@@ -39,66 +38,21 @@ impl Match {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct SearchParams {
-    /// Number of results to return
-    pub k: usize,
-    /// Minimum score threshold
-    pub min_score: Option<f32>,
-    // Perform exact or approximate search
-    pub exact: bool,
+// for use with serde defaults
+fn default_k() -> usize {
+    10
 }
 
-impl Default for SearchParams {
-    fn default() -> Self {
-        Self {
-            k: 10,
-            min_score: None,
-            exact: false,
-        }
-    }
-}
+pub trait SearchParamsExt {
+    fn k(&self) -> usize;
 
-impl SearchParams {
-    pub fn search_k(&self, data: &impl DataSource) -> usize {
-        if self.exact {
-            self.k * data.max_fields().max(1) as usize
+    fn exact(&self) -> bool;
+
+    fn search_k(&self, data: &impl DataSource) -> usize {
+        if self.exact() {
+            self.k() * data.max_fields().max(1) as usize
         } else {
-            (self.k as f32 * data.avg_fields()).ceil() as usize
-        }
-    }
-
-    pub fn with_k(mut self, k: usize) -> Self {
-        self.k = k;
-        self
-    }
-
-    pub fn with_exact(mut self, exact: bool) -> Self {
-        self.exact = exact;
-        self
-    }
-
-    pub fn with_min_score(mut self, score: f32) -> Self {
-        self.min_score = Some(score);
-        self
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum SearchIndex {
-    Keyword(KeywordIndex),
-    FullText(FullTextIndex),
-    TextEmbedding(TextEmbeddingIndex),
-    Embedding(EmbeddingIndex),
-}
-
-impl SearchIndex {
-    pub fn index_type(&self) -> &'static str {
-        match self {
-            SearchIndex::Keyword(index) => index.index_type(),
-            SearchIndex::FullText(index) => index.index_type(),
-            SearchIndex::TextEmbedding(index) => index.index_type(),
-            SearchIndex::Embedding(index) => index.index_type(),
+            (self.k() as f32 * data.avg_fields()).ceil() as usize
         }
     }
 }
@@ -112,7 +66,7 @@ pub trait Search: Send + Sync {
     /// The build parameters the index accepts
     type BuildParams;
     /// The search parameters the index accepts
-    type SearchParams;
+    type SearchParams: SearchParamsExt;
 
     /// Build and save an index
     fn build(data: &Self::Data, index_dir: &Path, params: &Self::BuildParams) -> Result<()>
@@ -131,7 +85,7 @@ pub trait Search: Send + Sync {
     fn search_with_filter<F>(
         &self,
         query: Self::Query<'_>,
-        params: &SearchParams,
+        params: &Self::SearchParams,
         filter: F,
     ) -> Result<Vec<Match>>
     where

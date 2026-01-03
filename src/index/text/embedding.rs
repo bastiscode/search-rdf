@@ -2,11 +2,12 @@ use crate::data::embedding::EmbeddingRef;
 use crate::data::text::embedding::TextEmbeddings;
 use crate::data::{DataSource, Precision};
 use crate::index::embedding::{Metadata, binary_quantization};
-use crate::index::{EmbeddingIndexParams, Match, Search, SearchParams};
+use crate::index::{EmbeddingIndexParams, Match, Search, SearchParamsExt};
 use crate::utils::{load_json, write_json};
 use crate::utils::{load_u32_vec, progress_bar};
 use anyhow::{Result, anyhow};
 use ordered_float::OrderedFloat;
+use serde::Deserialize;
 use std::cmp::Reverse;
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write};
@@ -66,7 +67,7 @@ impl TextEmbeddingIndex {
     fn search_internal<F>(
         &self,
         embedding: EmbeddingRef<'_>,
-        params: &SearchParams,
+        params: &TextEmbeddingSearchParams,
         filter: Option<F>,
     ) -> Result<Vec<Match>>
     where
@@ -166,11 +167,31 @@ impl TextEmbeddingIndex {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct TextEmbeddingSearchParams {
+    #[serde(default = "crate::index::default_k")]
+    pub k: usize,
+    #[serde(default)]
+    pub min_score: Option<f32>,
+    #[serde(default)]
+    pub exact: bool,
+}
+
+impl SearchParamsExt for TextEmbeddingSearchParams {
+    fn k(&self) -> usize {
+        self.k
+    }
+
+    fn exact(&self) -> bool {
+        self.exact
+    }
+}
+
 impl Search for TextEmbeddingIndex {
     type Data = TextEmbeddings;
     type Query<'q> = EmbeddingRef<'q>;
     type BuildParams = EmbeddingIndexParams;
-    type SearchParams = SearchParams;
+    type SearchParams = TextEmbeddingSearchParams;
 
     fn build(data: &Self::Data, index_dir: &Path, params: &Self::BuildParams) -> Result<()> {
         // Validate metric is compatible with precision
@@ -477,9 +498,7 @@ mod tests {
 
                 // Test search with filter - exclude Q1
                 let results_filtered = index
-                    .search_with_filter(&query, &SearchParams::default(), |id| {
-                        id != 0
-                    })
+                    .search_with_filter(&query, &SearchParams::default(), |id| id != 0)
                     .expect("Failed to search with filter");
 
                 assert!(

@@ -1,12 +1,13 @@
 use crate::data::DataSource;
 use crate::data::text::TextData;
-use crate::index::{Match, Search, SearchParams};
+use crate::index::{Match, Search, SearchParamsExt};
 use crate::utils::{load_u32_vec, load_usize_vec_from_u64, progress_bar};
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
 use memmap2::Mmap;
 use ordered_float::OrderedFloat;
 use pathfinding::{kuhn_munkres::kuhn_munkres, matrix::Matrix};
+use serde::Deserialize;
 use std::fs::create_dir_all;
 use std::{
     cmp::{Ordering, Reverse},
@@ -353,19 +354,21 @@ impl KeywordIndex {
     fn search_internal<F>(
         &self,
         query: &str,
-        params: &SearchParams,
+        params: &KeywordSearchParams,
         filter: Option<F>,
     ) -> Result<Vec<Match>>
     where
         F: Fn(u32) -> bool,
     {
         let data = &self.inner.data;
+        let field_to_data = &self.inner.field_to_data;
+        let lengths = &self.inner.lengths;
 
         let search_k = params.search_k(data);
 
-        let filter = move |field_id| {
+        let filter = move |id| {
             if let Some(ref filter) = filter {
-                filter(field_id)
+                filter(id)
             } else {
                 // keep everything if no filter provided
                 true
@@ -410,7 +413,12 @@ impl KeywordIndex {
                 let mut last_field_id = None;
                 let mut occurrence = 0;
                 for &field_id in inv_list.parse()? {
-                    if skip.contains(&field_id) || !filter(field_id) {
+                    if skip.contains(&field_id) {
+                        continue;
+                    }
+
+                    let data_id = field_to_data[field_id as usize];
+                    if !filter(data_id) {
                         continue;
                     }
 
@@ -421,8 +429,7 @@ impl KeywordIndex {
                     }
                     last_field_id = Some(field_id);
 
-                    let data_id = self.inner.field_to_data[field_id as usize];
-                    let length = self.inner.lengths[field_id as usize];
+                    let length = lengths[field_id as usize];
 
                     // update item and get current score
                     let mut entry = items.entry(field_id);
@@ -509,11 +516,31 @@ impl KeywordIndex {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct KeywordSearchParams {
+    #[serde(default = "crate::index::default_k")]
+    pub k: usize,
+    #[serde(default)]
+    pub min_score: Option<f32>,
+    #[serde(default)]
+    pub exact: bool,
+}
+
+impl SearchParamsExt for KeywordSearchParams {
+    fn k(&self) -> usize {
+        self.k
+    }
+
+    fn exact(&self) -> bool {
+        self.exact
+    }
+}
+
 impl Search for KeywordIndex {
     type Data = TextData;
     type Query<'q> = &'q str;
     type BuildParams = ();
-    type SearchParams = SearchParams;
+    type SearchParams = KeywordSearchParams;
 
     fn build(data: &Self::Data, index_dir: &Path, _params: &Self::BuildParams) -> Result<()> {
         create_dir_all(index_dir)?;

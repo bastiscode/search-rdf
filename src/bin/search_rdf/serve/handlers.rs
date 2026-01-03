@@ -1,6 +1,7 @@
 use axum::extract::{Json, State};
-use search_rdf::index::SearchIndex;
 use serde::Serialize;
+
+use crate::search_rdf::index::SearchIndex;
 
 use super::types::AppState;
 
@@ -13,7 +14,9 @@ pub async fn health() -> &'static str {
 #[derive(Serialize)]
 pub struct IndexInfo {
     name: String,
+    #[serde(rename = "type")]
     index_type: String,
+    #[serde(rename = "supported-query-types")]
     query_types: Vec<&'static str>,
 }
 

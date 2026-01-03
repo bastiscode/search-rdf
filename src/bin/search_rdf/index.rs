@@ -1,14 +1,62 @@
 use anyhow::{Context, Result};
 use log::info;
+use search_rdf::index::embedding::EmbeddingSearchParams;
+use search_rdf::index::keyword::KeywordSearchParams;
+use search_rdf::index::text::embedding::TextEmbeddingSearchParams;
+use search_rdf::index::text::full_text::FullTextSearchParams;
+use serde::Deserialize;
+use serde::de::{IntoDeserializer, value};
+use std::collections::HashMap;
 use std::path::Path;
 
 use search_rdf::data::DataSource;
 use search_rdf::data::embedding::Embeddings;
 use search_rdf::data::text::{TextData, TextEmbeddings};
 use search_rdf::index::text::{FullTextIndex, KeywordIndex, TextEmbeddingIndex};
-use search_rdf::index::{EmbeddingIndex, EmbeddingIndexParams, Search, SearchIndex};
+use search_rdf::index::{EmbeddingIndex, EmbeddingIndexParams, Search};
 
 use crate::search_rdf::config::{Config, IndexType};
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SearchParams {
+    Keyword(KeywordSearchParams),
+    #[serde(rename = "full-text")]
+    FullText(FullTextSearchParams),
+    #[serde(rename = "text-embedding")]
+    TextEmbedding(TextEmbeddingSearchParams),
+    Embedding(EmbeddingSearchParams),
+}
+
+impl TryFrom<HashMap<String, String>> for SearchParams {
+    type Error = anyhow::Error;
+
+    fn try_from(map: HashMap<String, String>) -> Result<Self, Self::Error> {
+        // use serde to deserialize the hashmap into the appropriate SearchParams variant
+        Self::deserialize(map.into_deserializer()).map_err(|e: value::Error| {
+            anyhow::anyhow!("Failed to deserialize SearchParams from map: {}", e)
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SearchIndex {
+    Keyword(KeywordIndex),
+    FullText(FullTextIndex),
+    TextEmbedding(TextEmbeddingIndex),
+    Embedding(EmbeddingIndex),
+}
+
+impl SearchIndex {
+    pub fn index_type(&self) -> &'static str {
+        match self {
+            SearchIndex::Keyword(index) => index.index_type(),
+            SearchIndex::FullText(index) => index.index_type(),
+            SearchIndex::TextEmbedding(index) => index.index_type(),
+            SearchIndex::Embedding(index) => index.index_type(),
+        }
+    }
+}
 
 pub fn run(config_path: &Path, force: bool) -> Result<()> {
     let config = Config::load(config_path)?;

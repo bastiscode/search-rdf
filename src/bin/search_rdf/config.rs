@@ -155,6 +155,11 @@ impl IndexType {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct SparqlConfig {
+    pub prefix: String,
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ServerConfig {
     #[serde(default = "default_host")]
@@ -166,6 +171,8 @@ pub struct ServerConfig {
     pub indices: Vec<String>,
     #[serde(default)]
     pub cors: bool,
+    #[serde(default)]
+    pub sparql: Option<SparqlConfig>,
 }
 
 fn default_host() -> String {

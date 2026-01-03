@@ -86,17 +86,30 @@ pub async fn run(config_path: &Path) -> Result<()> {
         search_indices.insert(name.to_string(), search_index);
     }
 
-    let state = AppState::new(search_indices, models, index_to_model);
+    let addr = format!("{}:{}", server.host, server.port);
+    info!("Serving on http://{}", addr);
+    info!("Available endpoints:");
+    info!("GET  /health");
+    info!("GET  /indices");
+    info!("POST /search/{{index}}");
 
     // Build router
     let mut app = Router::new()
+        .layer(DefaultBodyLimit::max(1024 * 1024 * 1024)) // 1 GB
         .route("/health", get(health))
         .route("/indices", get(list_indices))
-        .route("/search/{index}", post(search))
-        .route("/service/{index}", post(service))
-        .route("/qlproxy/{index}", post(qlproxy))
-        .layer(DefaultBodyLimit::max(1024 * 1024 * 1024)) // 1 GB
-        .with_state(state);
+        .route("/search/{index}", post(search));
+
+    if server.sparql.is_some() {
+        // increase body limit if SPARQL service is enabled, because we
+        // might receive large results in the qlproxy endpoint
+        app = app
+            .route("/service/{index}", post(service))
+            .route("/qlproxy/{index}", post(qlproxy));
+
+        info!("POST /service/{{index}}");
+        info!("POST /qlproxy/{{index}}");
+    };
 
     // Add CORS if enabled
     if server.cors {
@@ -107,14 +120,13 @@ pub async fn run(config_path: &Path) -> Result<()> {
         app = app.layer(cors);
     }
 
-    let addr = format!("{}:{}", server.host, server.port);
-    info!("Serving on http://{}", addr);
-    info!("Available endpoints:");
-    info!("GET  /health");
-    info!("GET  /indices");
-    info!("POST /search/{{index}}");
-    info!("POST /service/{{index}}");
-    info!("POST /qlproxy/{{index}}");
+    let state = AppState::new(
+        search_indices,
+        models,
+        index_to_model,
+        server.sparql.clone(),
+    );
+    let app = app.with_state(state);
 
     let listener = TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;

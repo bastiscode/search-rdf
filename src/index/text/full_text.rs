@@ -9,11 +9,12 @@ use std::{
 
 use crate::{
     data::{DataSource, TextData},
-    index::{Match, Search, SearchParams},
+    index::{Match, Search, SearchParamsExt},
     utils::{load_u32_vec, progress_bar},
 };
 use anyhow::{Result, anyhow};
 use ordered_float::OrderedFloat;
+use serde::Deserialize;
 use tantivy::Index;
 use tantivy::query::QueryParser;
 use tantivy::schema::*;
@@ -59,11 +60,31 @@ impl FullTextIndex {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct FullTextSearchParams {
+    #[serde(default = "crate::index::default_k")]
+    pub k: usize,
+    #[serde(default)]
+    pub min_score: Option<f32>,
+    #[serde(default)]
+    pub exact: bool,
+}
+
+impl SearchParamsExt for FullTextSearchParams {
+    fn k(&self) -> usize {
+        self.k
+    }
+
+    fn exact(&self) -> bool {
+        self.exact
+    }
+}
+
 impl Search for FullTextIndex {
     type Data = TextData;
     type Query<'e> = &'e str;
     type BuildParams = ();
-    type SearchParams = SearchParams;
+    type SearchParams = FullTextSearchParams;
 
     fn build(data: &Self::Data, index_dir: &Path, _params: &Self::BuildParams) -> Result<()>
     where

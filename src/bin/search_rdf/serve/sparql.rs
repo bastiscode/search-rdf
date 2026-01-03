@@ -9,15 +9,21 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use log::info;
 use oxrdf::vocab::xsd;
-use oxrdf::{Literal, Term, Variable};
-use search_rdf::index::{Search, SearchIndex, SearchParams};
+use oxrdf::{Literal, NamedNode, Term, Variable};
+use search_rdf::index::Search;
 use serde::Deserialize;
 use sparesults::{
     QueryResultsFormat, QueryResultsParser, QueryResultsSerializer, QuerySolution,
     ReaderQueryResultsParserOutput,
 };
+use spargebra::algebra::GraphPattern;
+use spargebra::term::{NamedNodePattern, TermPattern};
+use spargebra::{Query as SparqlQuery, SparqlParser};
 
-use crate::search_rdf::serve::search::{MatchInfo, perform_text_search_with_filter};
+use crate::search_rdf::index::{SearchIndex, SearchParams};
+use crate::search_rdf::serve::search::{
+    MatchInfo, perform_text_search, perform_text_search_with_filter,
+};
 
 use super::search::SearchMatch;
 use super::types::{AppError, AppState};
@@ -26,17 +32,13 @@ use super::types::{AppError, AppState};
 pub struct QlProxyParams {
     // Search parameters (query is required)
     query: String,
-    k: Option<usize>,
-    #[serde(rename = "min-score")]
-    min_score: Option<f32>,
-    exact: Option<bool>,
-
-    // Row variable name (default: "row")
-    #[serde(default = "default_row_var")]
+    #[serde(default = "default_rowvar")]
     rowvar: String,
+    #[serde(flatten)]
+    params: SearchParams,
 }
 
-fn default_row_var() -> String {
+fn default_rowvar() -> String {
     "row".to_string()
 }
 
@@ -45,12 +47,11 @@ fn default_row_var() -> String {
 fn search_match_to_solution(
     search_match: SearchMatch,
     variables: &[Variable],
-    row: Term,
+    values: &[Option<Term>],
     rank: usize,
 ) -> Result<QuerySolution> {
-    let mut values = vec![
-        // row
-        Some(row),
+    let mut values = values.to_vec();
+    values.extend([
         // rank
         Some(Term::Literal(Literal::new_typed_literal(
             rank.to_string(),
@@ -66,12 +67,17 @@ fn search_match_to_solution(
             search_match.score.to_string(),
             xsd::FLOAT,
         ))),
-    ];
+    ]);
 
     // Extract identifier and field from MatchInfo if available
     if let MatchInfo::Text { identifier, field } = search_match.info {
-        values.push(Some(Term::Literal(Literal::new_simple_literal(identifier))));
-        values.push(Some(Term::Literal(Literal::new_simple_literal(field))));
+        values.push(Some(Term::NamedNode(NamedNode::new(identifier).map_err(
+            |e| anyhow!("Failed to create IRI from identifier: {e}"),
+        )?)));
+        values.push(Some(Term::Literal(Literal::new_typed_literal(
+            field,
+            xsd::STRING,
+        ))));
     }
 
     if variables.len() != values.len() {
@@ -97,19 +103,279 @@ fn get_id_from_identifier(index: &SearchIndex, identifier: &str) -> Option<u32> 
 /// Receives a group graph pattern in the body (not SPARQL Results JSON)
 pub async fn service(
     AxumPath(index_name): AxumPath<String>,
-    State(_state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
     body: Bytes,
 ) -> Result<Response, AppError> {
-    // Log the incoming request
-    info!("SERVICE endpoint called for index: {}", index_name);
-    info!("Headers:\n{:?}", headers);
-    info!("Body:\n{}", String::from_utf8_lossy(&body));
+    let sparql_config = state
+        .inner
+        .sparql
+        .as_ref()
+        .ok_or_else(|| anyhow!("No SPARQL configuration found in server"))?;
 
-    Err(AppError(
-        StatusCode::NOT_IMPLEMENTED,
-        anyhow!("SERVICE endpoint not yet implemented"),
-    ))
+    // Get index and model from state
+    let index = state
+        .inner
+        .indices
+        .get(&index_name)
+        .cloned()
+        .ok_or_else(|| {
+            AppError(
+                StatusCode::BAD_REQUEST,
+                anyhow!("Index not found: {}", index_name),
+            )
+        })?;
+
+    let model = state
+        .inner
+        .index_to_model
+        .get(&index_name)
+        .and_then(|model_name| state.inner.models.get(model_name));
+
+    // Log the incoming request
+    let body = String::from_utf8_lossy(&body);
+    info!(
+        "SERVICE endpoint called for index {}:\n{}",
+        index_name, body
+    );
+
+    let SparqlQuery::Select { pattern, .. } =
+        SparqlParser::new().parse_query(&body).map_err(|e| {
+            AppError(
+                StatusCode::BAD_REQUEST,
+                anyhow!("Failed to parse SERVICE clause body: {e}"),
+            )
+        })?
+    else {
+        return Err(AppError(
+            StatusCode::BAD_REQUEST,
+            anyhow!("Only SELECT queries are supported in SERVICE endpoint"),
+        ));
+    };
+
+    let GraphPattern::Project { inner: pattern, .. } = pattern else {
+        return Err(AppError(
+            StatusCode::BAD_REQUEST,
+            anyhow!("Invalid GRAPH PATTERN in SERVICE endpoint"),
+        ));
+    };
+
+    let GraphPattern::Bgp { patterns } = *pattern else {
+        return Err(AppError(
+            StatusCode::BAD_REQUEST,
+            anyhow!("Only basic triple patterns are supported in this SERVICE endpoint"),
+        ));
+    };
+
+    let mut query = None;
+    let mut variables = HashMap::new();
+    let mut params = HashMap::new();
+
+    for tp in patterns {
+        match &tp.subject {
+            TermPattern::NamedNode(iri) => {
+                let Some("config") = iri.as_str().strip_prefix(&sparql_config.prefix) else {
+                    return Err(AppError(
+                        StatusCode::BAD_REQUEST,
+                        anyhow!("Subject IRI must always be {}config", sparql_config.prefix),
+                    ));
+                };
+            }
+            _ => {
+                return Err(AppError(
+                    StatusCode::BAD_REQUEST,
+                    anyhow!("Subject in pattern {tp} is not an IRI"),
+                ));
+            }
+        }
+
+        match &tp.predicate {
+            NamedNodePattern::NamedNode(iri) => {
+                let pred = iri
+                    .as_str()
+                    .strip_prefix(&sparql_config.prefix)
+                    .ok_or_else(|| {
+                        AppError(
+                            StatusCode::BAD_REQUEST,
+                            anyhow!(
+                                "Predicate IRI must use prefix {}: {}",
+                                sparql_config.prefix,
+                                iri.as_str()
+                            ),
+                        )
+                    })?;
+
+                match pred {
+                    "query" => {
+                        if let TermPattern::Literal(lit) = tp.object {
+                            query = Some(lit.value().to_string());
+                        } else {
+                            return Err(AppError(
+                                StatusCode::BAD_REQUEST,
+                                anyhow!("Expected literal for 'query' predicate"),
+                            ));
+                        }
+                    }
+                    name @ ("id" | "field" | "identifier" | "score" | "rank") => {
+                        if let TermPattern::Variable(var) = tp.object {
+                            variables.insert(name.to_string(), var);
+                        } else {
+                            return Err(AppError(
+                                StatusCode::BAD_REQUEST,
+                                anyhow!("Expected literal for '{name}' predicate"),
+                            ));
+                        }
+                    }
+                    param => {
+                        if let TermPattern::Literal(lit) = tp.object {
+                            params.insert(param.to_string(), lit.value().to_string());
+                        } else {
+                            return Err(AppError(
+                                StatusCode::BAD_REQUEST,
+                                anyhow!("Expected literal for '{param}' predicate"),
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {
+                return Err(AppError(
+                    StatusCode::BAD_REQUEST,
+                    anyhow!("Predicate in pattern {tp} is not an IRI"),
+                ));
+            }
+        }
+    }
+
+    let Some(query) = query else {
+        return Err(AppError(
+            StatusCode::BAD_REQUEST,
+            anyhow!("Missing required 'query' config parameter"),
+        ));
+    };
+
+    if !variables.contains_key("identifier") {
+        return Err(AppError(
+            StatusCode::BAD_REQUEST,
+            anyhow!("Missing required 'identifier' variable binding"),
+        ));
+    }
+
+    let vars: Vec<_> = ["rank", "id", "score", "identifier", "field"]
+        .into_iter()
+        .filter_map(|name| variables.get(name).cloned())
+        .collect();
+
+    // convert params
+    let params = params.try_into().map_err(|e| {
+        AppError(
+            StatusCode::BAD_REQUEST,
+            anyhow!("Failed to parse search parameters: {}", e),
+        )
+    })?;
+
+    // perform search
+    let matches = perform_text_search(index, vec![query], params, model).await?;
+
+    // write results
+    let mut buffer = Vec::new();
+    let mut serializer = QueryResultsSerializer::from_format(QueryResultsFormat::Json)
+        .serialize_solutions_to_writer(&mut buffer, variables.values().cloned().collect())
+        .map_err(|e| anyhow!("Failed to create serializer: {}", e))?;
+
+    for (rank, search_match) in matches.into_iter().flatten().enumerate() {
+        let mut values = vec![];
+        if variables.contains_key("rank") {
+            values.push(Some(Term::Literal(Literal::new_typed_literal(
+                (rank + 1).to_string(),
+                xsd::INTEGER,
+            ))));
+        }
+
+        if variables.contains_key("id") {
+            values.push(Some(Term::Literal(Literal::new_typed_literal(
+                search_match.id.to_string(),
+                xsd::INTEGER,
+            ))));
+        }
+
+        if variables.contains_key("score") {
+            values.push(Some(Term::Literal(Literal::new_typed_literal(
+                search_match.score.to_string(),
+                xsd::FLOAT,
+            ))));
+        }
+
+        // Extract identifier and field from MatchInfo if available
+        let mut identifier_term = None;
+        let mut field_term = None;
+        if let MatchInfo::Text { identifier, field } = search_match.info {
+            identifier_term = Some(Term::NamedNode(
+                NamedNode::new(identifier)
+                    .map_err(|e| anyhow!("Failed to create IRI from identifier: {e}"))?,
+            ));
+
+            if variables.contains_key("field") {
+                field_term = Some(Term::Literal(Literal::new_simple_literal(field)));
+            }
+        }
+
+        if identifier_term.is_none() {
+            return Err(AppError(
+                StatusCode::BAD_REQUEST,
+                anyhow!(
+                    "Missing identifier in search match, the index may not support identifier retrieval"
+                ),
+            ));
+        }
+
+        values.push(identifier_term);
+
+        if field_term.is_some() {
+            values.push(field_term);
+        }
+
+        let solution = QuerySolution::from((vars.as_ref(), values));
+        serializer
+            .serialize(&solution)
+            .map_err(|e| anyhow!("Failed to serialize solution: {}", e))?;
+    }
+
+    serializer
+        .finish()
+        .map_err(|e| anyhow!("Failed to finish serialization: {}", e))?;
+
+    // Return as response with correct content type
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/sparql-results+json")
+        .body(buffer.into())
+        .map_err(|e| anyhow!("Failed to build response: {}", e))?)
+}
+
+fn serialize_search_matches(
+    matches: Vec<Vec<SearchMatch>>,
+    variables: &[Variable],
+    row_fn: impl Fn(u32) -> Result<Term>,
+) -> Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+    let mut serializer = QueryResultsSerializer::from_format(QueryResultsFormat::Json)
+        .serialize_solutions_to_writer(&mut buffer, variables.to_vec())
+        .map_err(|e| anyhow!("Failed to create serializer: {}", e))?;
+
+    for (rank, search_match) in matches.into_iter().flatten().enumerate() {
+        let row = row_fn(search_match.id)?;
+        let solution = search_match_to_solution(search_match, variables, &[Some(row)], rank + 1)?;
+
+        serializer
+            .serialize(&solution)
+            .map_err(|e| anyhow!("Failed to serialize solution: {}", e))?;
+    }
+
+    serializer
+        .finish()
+        .map_err(|e| anyhow!("Failed to finish serialization: {}", e))?;
+
+    Ok(buffer)
 }
 
 pub async fn qlproxy(
@@ -119,9 +385,10 @@ pub async fn qlproxy(
     body: Bytes,
 ) -> Result<Response, AppError> {
     info!(
-        "QL Proxy endpoint called for index: {}, params: {:?}",
+        "QL Proxy endpoint called for index {}:\n{:?}",
         index_name, params
     );
+
     // Get index and model from state
     let index = state
         .inner
@@ -211,21 +478,6 @@ pub async fn qlproxy(
         start.elapsed().as_millis()
     );
 
-    // Build search params
-    let mut search_params = SearchParams::default();
-
-    if let Some(k) = params.k {
-        search_params = search_params.with_k(k);
-    }
-
-    if let Some(exact) = params.exact {
-        search_params = search_params.with_exact(exact);
-    }
-
-    if let Some(min_score) = params.min_score {
-        search_params = search_params.with_min_score(min_score);
-    }
-
     // Make thread-safe id_to_row map for filtering
     let id_to_row = Arc::new(id_to_row);
     let id_to_row_clone = id_to_row.clone();
@@ -234,12 +486,12 @@ pub async fn qlproxy(
     // Always perform filtered search
     let start = Instant::now();
     let matches =
-        perform_text_search_with_filter(index, vec![params.query], search_params, model, filter)
+        perform_text_search_with_filter(index, vec![params.query], params.params, model, filter)
             .await?;
 
     info!("Search completed in {}ms", start.elapsed().as_millis());
 
-    // Determine output variable names
+    // Determine output variables
     let variables = vec![
         Variable::new_unchecked(params.rowvar),
         Variable::new_unchecked("rank"),
@@ -249,35 +501,21 @@ pub async fn qlproxy(
         Variable::new_unchecked("field"),
     ];
 
-    let mut response_buffer = Vec::new();
-    let mut serializer = QueryResultsSerializer::from_format(QueryResultsFormat::Json)
-        .serialize_solutions_to_writer(&mut response_buffer, variables.clone())
-        .map_err(|e| anyhow!("Failed to create serializer: {}", e))?;
-
-    for (rank, search_match) in matches.into_iter().flatten().enumerate() {
+    // Custom values
+    let row_fn = |id: u32| {
         // Get the row binding from id_to_row map
-        let row = id_to_row.get(&search_match.id).cloned().ok_or_else(|| {
-            anyhow!(
-                "No row found for identifier ID {} in search match",
-                search_match.id
-            )
-        })?;
+        id_to_row
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| anyhow!("No row found for identifier ID {} in search match", id))
+    };
 
-        let solution = search_match_to_solution(search_match, &variables, row, rank + 1)?;
-
-        serializer
-            .serialize(&solution)
-            .map_err(|e| anyhow!("Failed to serialize solution: {}", e))?;
-    }
-
-    serializer
-        .finish()
-        .map_err(|e| anyhow!("Failed to finish serialization: {}", e))?;
+    let response = serialize_search_matches(matches, &variables, row_fn)?;
 
     // Return as response with correct content type
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/sparql-results+json")
-        .body(response_buffer.into())
+        .body(response.into())
         .map_err(|e| anyhow!("Failed to build response: {}", e))?)
 }

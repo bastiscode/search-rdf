@@ -7,9 +7,11 @@ use serde::{Deserialize, Serialize};
 
 use search_rdf::{
     data::{DataSource, TextData},
-    index::{Match, Search, SearchIndex, SearchParams},
+    index::{Match, Search},
     model::{Embed, EmbeddingModel},
 };
+
+use crate::search_rdf::index::{SearchIndex, SearchParams};
 
 use super::types::{AppError, AppState};
 
@@ -17,15 +19,8 @@ use super::types::{AppError, AppState};
 #[derive(Deserialize)]
 pub struct SearchRequest {
     query: QueryType,
-    #[serde(default = "default_k")]
-    k: usize,
-    min_score: Option<f32>,
-    #[serde(default)]
-    exact: bool,
-}
-
-fn default_k() -> usize {
-    10
+    #[serde(flatten)]
+    params: SearchParams,
 }
 
 #[derive(Deserialize)]
@@ -129,33 +124,47 @@ async fn search_parallel<I: Send + Sync + 'static>(
 /// Returns a vector of search results for each query in the input
 pub async fn perform_text_search(
     index: SearchIndex,
-    text: Vec<String>,
+    queries: Vec<String>,
     params: SearchParams,
     model: Option<&(EmbeddingModel, EmbeddingParams)>,
 ) -> Result<Vec<Vec<SearchMatch>>> {
     match index {
         SearchIndex::Keyword(index) => {
-            search_parallel(text, move |text| {
-                let matches = index.search(text.as_str(), &params)?;
+            let SearchParams::Keyword(params) = params else {
+                return Err(anyhow!("Invalid search parameters for keyword index"));
+            };
+
+            search_parallel(queries, move |query| {
+                let matches = index.search(query.as_str(), &params)?;
                 convert_to_text_search_matches(matches, index.data())
             })
             .await
         }
         SearchIndex::FullText(index) => {
-            search_parallel(text, move |text| {
-                let matches = index.search(text.as_str(), &params)?;
+            let SearchParams::FullText(params) = params else {
+                return Err(anyhow!("Invalid search parameters for full-text index"));
+            };
+
+            search_parallel(queries, move |query| {
+                let matches = index.search(query.as_str(), &params)?;
                 convert_to_text_search_matches(matches, index.data())
             })
             .await
         }
         SearchIndex::TextEmbedding(index) => {
+            let SearchParams::TextEmbedding(params) = params else {
+                return Err(anyhow!(
+                    "Invalid search parameters for text embedding index"
+                ));
+            };
+
             // For text embedding index with text query, we'd need to embed the text first
             let Some((model, model_params)) = model else {
                 return Err(anyhow!("No embedding model specified for embedding search"));
             };
             let embeddings = match model {
-                EmbeddingModel::SentenceTransformer(m) => m.embed(&text, model_params)?,
-                EmbeddingModel::Vllm(m) => m.embed(&text, model_params)?,
+                EmbeddingModel::SentenceTransformer(m) => m.embed(&queries, model_params)?,
+                EmbeddingModel::Vllm(m) => m.embed(&queries, model_params)?,
             };
             search_parallel(embeddings, move |emb| {
                 let matches = index.search(&emb, &params)?;
@@ -174,34 +183,48 @@ pub async fn perform_text_search(
 /// Returns a vector of search results for each query in the input
 pub async fn perform_text_search_with_filter(
     index: SearchIndex,
-    text: Vec<String>,
+    queries: Vec<String>,
     params: SearchParams,
     model: Option<&(EmbeddingModel, EmbeddingParams)>,
     filter: impl Fn(u32) -> bool + Clone + Send + 'static,
 ) -> Result<Vec<Vec<SearchMatch>>> {
     match index {
         SearchIndex::Keyword(index) => {
-            search_parallel(text, move |text| {
-                let matches = index.search_with_filter(text.as_str(), &params, filter.clone())?;
+            let SearchParams::Keyword(params) = params else {
+                return Err(anyhow!("Invalid search parameters for keyword index"));
+            };
+
+            search_parallel(queries, move |query| {
+                let matches = index.search_with_filter(query.as_str(), &params, filter.clone())?;
                 convert_to_text_search_matches(matches, index.data())
             })
             .await
         }
         SearchIndex::FullText(index) => {
-            search_parallel(text, move |text| {
-                let matches = index.search_with_filter(text.as_str(), &params, filter.clone())?;
+            let SearchParams::FullText(params) = params else {
+                return Err(anyhow!("Invalid search parameters for full-text index"));
+            };
+
+            search_parallel(queries, move |query| {
+                let matches = index.search_with_filter(query.as_str(), &params, filter.clone())?;
                 convert_to_text_search_matches(matches, index.data())
             })
             .await
         }
         SearchIndex::TextEmbedding(index) => {
+            let SearchParams::TextEmbedding(params) = params else {
+                return Err(anyhow!(
+                    "Invalid search parameters for text embedding index"
+                ));
+            };
+
             // For text embedding index with text query, we'd need to embed the text first
             let Some((model, model_params)) = model else {
                 return Err(anyhow!("No embedding model specified for embedding search"));
             };
             let embeddings = match model {
-                EmbeddingModel::SentenceTransformer(m) => m.embed(&text, model_params)?,
-                EmbeddingModel::Vllm(m) => m.embed(&text, model_params)?,
+                EmbeddingModel::SentenceTransformer(m) => m.embed(&queries, model_params)?,
+                EmbeddingModel::Vllm(m) => m.embed(&queries, model_params)?,
             };
             search_parallel(embeddings, move |emb| {
                 let matches = index.search_with_filter(&emb, &params, filter.clone())?;
@@ -227,6 +250,12 @@ pub async fn perform_search(
     match (index, query) {
         (index, QueryType::Text(text)) => perform_text_search(index, text, params, model).await,
         (SearchIndex::TextEmbedding(index), QueryType::Embedding(embedding)) => {
+            let SearchParams::TextEmbedding(params) = params else {
+                return Err(anyhow!(
+                    "Invalid search parameters for text embedding index"
+                ));
+            };
+
             search_parallel(embedding, move |emb| {
                 let matches = index.search(&emb, &params)?;
                 convert_to_text_search_matches(matches, index.data().text_data())
@@ -234,6 +263,10 @@ pub async fn perform_search(
             .await
         }
         (SearchIndex::Embedding(index), QueryType::Embedding(embedding)) => {
+            let SearchParams::Embedding(params) = params else {
+                return Err(anyhow!("Invalid search parameters for embedding index"));
+            };
+
             search_parallel(embedding, move |emb| {
                 index.search(&emb, &params).map(convert_matches)
             })
@@ -270,13 +303,7 @@ pub async fn search(
         .get(&index_name)
         .and_then(|model_name| state.inner.models.get(model_name));
 
-    let mut params = SearchParams::default().with_k(req.k).with_exact(req.exact);
-
-    if let Some(min_score) = req.min_score {
-        params = params.with_min_score(min_score);
-    }
-
-    let matches = perform_search(index, req.query, params, model).await?;
+    let matches = perform_search(index, req.query, req.params, model).await?;
 
     Ok(Json(SearchResponse { matches }))
 }

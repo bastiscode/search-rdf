@@ -1,5 +1,5 @@
 use crate::data::Embeddings;
-use crate::index::SearchParams;
+use crate::index::SearchParamsExt;
 use crate::utils::progress_bar;
 use crate::{
     data::{
@@ -200,7 +200,7 @@ impl EmbeddingIndex {
     fn search_internal<'e, F>(
         &self,
         embedding: EmbeddingRef<'e>,
-        params: &SearchParams,
+        params: &EmbeddingSearchParams,
         filter: Option<F>,
     ) -> Result<Vec<Match>>
     where
@@ -312,11 +312,31 @@ pub fn binary_quantization(embedding: &[f32]) -> Result<Vec<u8>> {
     Ok(binary_emb)
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct EmbeddingSearchParams {
+    #[serde(default = "crate::index::default_k")]
+    pub k: usize,
+    #[serde(default)]
+    pub min_score: Option<f32>,
+    #[serde(default)]
+    pub exact: bool,
+}
+
+impl SearchParamsExt for EmbeddingSearchParams {
+    fn k(&self) -> usize {
+        self.k
+    }
+
+    fn exact(&self) -> bool {
+        self.exact
+    }
+}
+
 impl Search for EmbeddingIndex {
     type Data = Embeddings;
     type Query<'q> = EmbeddingRef<'q>;
     type BuildParams = EmbeddingIndexParams;
-    type SearchParams = SearchParams;
+    type SearchParams = EmbeddingSearchParams;
 
     fn build(data: &Self::Data, index_dir: &Path, params: &Self::BuildParams) -> Result<()> {
         // Validate metric is compatible with precision
