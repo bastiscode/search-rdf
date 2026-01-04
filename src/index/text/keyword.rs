@@ -530,6 +530,16 @@ pub struct KeywordSearchParams {
     pub exact: bool,
 }
 
+impl Default for KeywordSearchParams {
+    fn default() -> Self {
+        Self {
+            k: 10,
+            min_score: None,
+            exact: false,
+        }
+    }
+}
+
 impl SearchParamsExt for KeywordSearchParams {
     fn k(&self) -> usize {
         self.k
@@ -694,7 +704,7 @@ mod tests {
         let index = build_keyword_index(data, &index_dir);
 
         let matches = index
-            .search("agar", &SearchParams::default().with_k(2).with_exact(true))
+            .search("agar", &KeywordSearchParams { k: 2, min_score: None, exact: true })
             .expect("Failed to find matches");
         assert_eq!(matches.len(), 2);
         assert!(matches!(matches[0], Match::WithField(0, 0, score) if (score - 1.0).abs() < 1e-6));
@@ -703,7 +713,7 @@ mod tests {
         let matches = index
             .search(
                 "agar agar",
-                &SearchParams::default().with_k(2).with_exact(true),
+                &KeywordSearchParams { k: 2, min_score: None, exact: true },
             )
             .expect("Failed to find matches");
         assert_eq!(matches.len(), 2);
@@ -733,7 +743,7 @@ mod tests {
         let matches = index
             .search(
                 "United States",
-                &SearchParams::default().with_k(1).with_exact(true),
+                &KeywordSearchParams { k: 1, min_score: None, exact: true },
             )
             .expect("Failed to find matches");
 
@@ -743,7 +753,7 @@ mod tests {
         let matches = index
             .search(
                 "United State",
-                &SearchParams::default().with_k(1).with_exact(true),
+                &KeywordSearchParams { k: 1, min_score: None, exact: true },
             )
             .expect("Failed to find matches");
 
@@ -753,7 +763,7 @@ mod tests {
         let matches = index
             .search(
                 "the U.S. of A",
-                &SearchParams::default().with_k(1).with_exact(true),
+                &KeywordSearchParams { k: 1, min_score: None, exact: true },
             )
             .expect("Failed to find matches");
 
@@ -764,7 +774,7 @@ mod tests {
         let matches = index
             .search(
                 "theunitedstates",
-                &SearchParams::default().with_k(1).with_exact(true),
+                &KeywordSearchParams { k: 1, min_score: None, exact: true },
             )
             .expect("Failed to find matches");
 
@@ -885,7 +895,7 @@ mod tests {
         let matches = index
             .search(
                 "specific alpha",
-                &SearchParams::default().with_k(10).with_exact(true),
+                &KeywordSearchParams { k: 10, min_score: None, exact: true },
             )
             .expect("Failed to search");
 
@@ -909,7 +919,7 @@ mod tests {
         let matches = index
             .search(
                 "specific beta",
-                &SearchParams::default().with_k(10).with_exact(true),
+                &KeywordSearchParams { k: 10, min_score: None, exact: true },
             )
             .expect("Failed to search");
 
@@ -932,7 +942,7 @@ mod tests {
         let matches = index
             .search(
                 "specific gamma",
-                &SearchParams::default().with_k(10).with_exact(true),
+                &KeywordSearchParams { k: 10, min_score: None, exact: true },
             )
             .expect("Failed to search");
 
@@ -955,7 +965,7 @@ mod tests {
         let matches = index
             .search(
                 "specific delta",
-                &SearchParams::default().with_k(10).with_exact(true),
+                &KeywordSearchParams { k: 10, min_score: None, exact: true },
             )
             .expect("Failed to search");
 
@@ -978,7 +988,7 @@ mod tests {
         let matches = index
             .search(
                 "common",
-                &SearchParams::default().with_k(10).with_exact(true),
+                &KeywordSearchParams { k: 10, min_score: None, exact: true },
             )
             .expect("Failed to search");
 

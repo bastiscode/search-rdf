@@ -324,6 +324,17 @@ pub struct EmbeddingSearchParams {
     pub rerank: Option<f32>,
 }
 
+impl Default for EmbeddingSearchParams {
+    fn default() -> Self {
+        Self {
+            k: 10,
+            min_score: None,
+            exact: false,
+            rerank: None,
+        }
+    }
+}
+
 impl EmbeddingSearchParams {
     pub fn do_rerank(&self) -> bool {
         self.rerank.is_some()
@@ -589,7 +600,7 @@ mod embedding_index_tests {
                 normalize(&mut query);
 
                 let results = index
-                    .search(&query, &SearchParams::default())
+                    .search(&query, &EmbeddingSearchParams::default())
                     .expect("Failed to search");
 
                 // Should find ID 100 as top result (deduped from two embeddings)
@@ -644,7 +655,7 @@ mod embedding_index_tests {
 
                 // Test search with filter - exclude ID 100
                 let results_filtered = index
-                    .search_with_filter(&query, &SearchParams::default(), |id| id != 100)
+                    .search_with_filter(&query, &EmbeddingSearchParams::default(), |id| id != 100)
                     .expect("Failed to search with filter");
 
                 // Should find ID 200 or 300, but not 100
@@ -698,7 +709,7 @@ mod embedding_index_tests {
             let query_ip = vec![1.0, 0.0, 0.0, 0.0]; // Unnormalized query
 
             let results = index
-                .search(&query_ip, &SearchParams::default())
+                .search(&query_ip, &EmbeddingSearchParams::default())
                 .expect("Failed to search");
 
             assert!(
@@ -768,7 +779,7 @@ mod embedding_index_tests {
         query_hamming.extend(vec![0.0; 16]);
 
         let results = index_hamming
-            .search(&query_hamming, &SearchParams::default())
+            .search(&query_hamming, &EmbeddingSearchParams::default())
             .expect("Failed to search");
 
         assert!(!results.is_empty(), "No results for Hamming Binary");
