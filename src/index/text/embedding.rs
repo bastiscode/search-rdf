@@ -1,14 +1,13 @@
 use crate::data::embedding::EmbeddingRef;
 use crate::data::text::embedding::TextEmbeddings;
 use crate::data::{DataSource, Precision};
-use crate::index::embedding::{Metadata, binary_quantization};
-use crate::index::{EmbeddingIndexParams, Match, Search, SearchParamsExt};
+use crate::index::embedding::{EmbeddingSearchParams, Metadata, binary_quantization};
+use crate::index::{EmbeddingIndex, EmbeddingIndexParams, Match, Search};
 use crate::utils::{load_json, write_json};
 use crate::utils::{load_u32_vec, progress_bar};
 use anyhow::{Result, anyhow};
+use itertools::Itertools;
 use ordered_float::OrderedFloat;
-use serde::Deserialize;
-use serde_aux::prelude::*;
 use std::cmp::Reverse;
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write};
@@ -65,89 +64,39 @@ impl TextEmbeddingIndex {
         offset
     }
 
-    fn search_internal<F>(
+    fn search_internal(
         &self,
         embedding: EmbeddingRef<'_>,
-        params: &TextEmbeddingSearchParams,
-        filter: Option<F>,
-    ) -> Result<Vec<Match>>
-    where
-        F: Fn(u32) -> bool,
-    {
+        params: &EmbeddingSearchParams,
+        filter: Option<impl Fn(u32) -> bool>,
+    ) -> Result<Vec<Match>> {
         let data = &self.inner.data;
         let index = &self.inner.index;
-        // TODO: support binary embeddings, should not be necessary, remove once usearch fixes this
-        let is_binary = self.inner.metadata.index.precision == Precision::Binary;
-
-        let num_dimensions = data.num_dimensions();
-        let search_k = params.search_k(data);
+        let field_to_data = &self.inner.field_to_data;
 
         let predicate = filter.map(|f| self.filter_internal(f));
 
-        // Validate embedding matches index precision and dimensions
-        if embedding.len() != num_dimensions {
-            return Err(anyhow!(
-                "Query embedding has {} dimensions, expected {}",
-                embedding.len(),
-                num_dimensions
-            ));
-        }
-
-        let results = if is_binary {
-            let binary_emb = binary_quantization(embedding)?;
-            let embedding = b1x8::from_u8s(&binary_emb);
-            if let Some(ref pred) = predicate {
-                if params.exact {
-                    return Err(anyhow!("Exact search with filter is not supported yet"));
-                }
-                index.filtered_search(embedding, search_k, pred)?
-            } else if params.exact {
-                index.exact_search(embedding, search_k)?
-            } else {
-                index.search(embedding, search_k)?
-            }
-        } else if let Some(ref pred) = predicate {
-            if params.exact {
-                return Err(anyhow!("Exact search with filter is not supported yet"));
-            }
-            index.filtered_search(embedding, search_k, pred)?
-        } else if params.exact {
-            index.exact_search(embedding, search_k)?
-        } else {
-            index.search(embedding, search_k)?
-        };
-
-        let mut matches: Vec<_> = results
-            .keys
-            .iter()
-            .zip(results.distances.iter())
-            .filter_map(|(&field_id, &distance)| {
-                let data_id = self.inner.field_to_data[field_id as usize];
-
-                // usearch returns distances (lower is better) for all metrics.
-                // Convert to a score where higher is better.
-                let score = self
-                    .inner
-                    .metadata
-                    .index
-                    .metric
-                    .to_score(distance, num_dimensions);
-
-                // Apply min_score filter
-                if let Some(min_score) = params.min_score
-                    && score < min_score
-                {
-                    return None;
-                }
-
-                Some((data_id, field_id, score))
-            })
-            .collect();
+        let matches = EmbeddingIndex::search(
+            embedding,
+            index,
+            self.inner.metadata.index.metric,
+            self.inner.metadata.index.precision,
+            data,
+            params,
+            predicate,
+        )?;
 
         // Sort by data_id, then by score descending, then by field_id
-        matches.sort_by_key(|&(data_id, field_id, score)| {
-            (data_id, Reverse(OrderedFloat(score)), field_id)
-        });
+        let mut matches: Vec<_> = matches
+            .into_iter()
+            .map(|(field_id, score)| {
+                let data_id = field_to_data[field_id as usize];
+                (data_id, field_id, score)
+            })
+            .sorted_by_key(|&(data_id, field_id, score)| {
+                (data_id, Reverse(OrderedFloat(score)), field_id)
+            })
+            .collect();
 
         // Deduplicate by data_id (keeping the best score)
         matches.dedup_by(|a, b| a.0 == b.0);
@@ -168,34 +117,11 @@ impl TextEmbeddingIndex {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct TextEmbeddingSearchParams {
-    #[serde(
-        default = "crate::index::default_k",
-        deserialize_with = "deserialize_number_from_string"
-    )]
-    pub k: usize,
-    #[serde(default, deserialize_with = "deserialize_option_number_from_string")]
-    pub min_score: Option<f32>,
-    #[serde(default, deserialize_with = "deserialize_bool_from_anything")]
-    pub exact: bool,
-}
-
-impl SearchParamsExt for TextEmbeddingSearchParams {
-    fn k(&self) -> usize {
-        self.k
-    }
-
-    fn exact(&self) -> bool {
-        self.exact
-    }
-}
-
 impl Search for TextEmbeddingIndex {
     type Data = TextEmbeddings;
     type Query<'q> = EmbeddingRef<'q>;
     type BuildParams = EmbeddingIndexParams;
-    type SearchParams = TextEmbeddingSearchParams;
+    type SearchParams = EmbeddingSearchParams;
 
     fn build(data: &Self::Data, index_dir: &Path, params: &Self::BuildParams) -> Result<()> {
         // Validate metric is compatible with precision

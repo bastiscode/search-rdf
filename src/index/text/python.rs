@@ -5,11 +5,9 @@ use crate::data::embedding::Embedding;
 use crate::data::text::python::{TextData, TextEmbeddings};
 use crate::index::Match;
 use crate::index::Search;
-use crate::index::embedding::{EmbeddingIndexParams, Metric};
+use crate::index::embedding::{EmbeddingIndexParams, EmbeddingSearchParams, Metric};
 use crate::index::keyword::KeywordSearchParams;
-use crate::index::text::embedding::{
-    TextEmbeddingIndex as RustTextEmbeddingIndex, TextEmbeddingSearchParams,
-};
+use crate::index::text::embedding::TextEmbeddingIndex as RustTextEmbeddingIndex;
 use crate::index::text::keyword::KeywordIndex as RustKeywordIndex;
 use anyhow::{Result, anyhow};
 use pyo3::prelude::*;
@@ -128,19 +126,21 @@ impl TextEmbeddingIndex {
         Ok(TextEmbeddingIndex { inner })
     }
 
-    #[pyo3(signature = (query, k=100, exact=false, min_score=None, allow_ids=None))]
+    #[pyo3(signature = (query, k=100, exact=false, min_score=None, rerank=None, allow_ids=None))]
     pub fn search(
         &self,
         query: Embedding,
         k: usize,
         exact: bool,
         min_score: Option<f32>,
+        rerank: Option<f32>,
         allow_ids: Option<HashSet<u32>>,
     ) -> Result<Vec<Match>> {
-        let params = TextEmbeddingSearchParams {
+        let params = EmbeddingSearchParams {
             k,
             exact,
             min_score,
+            rerank,
         };
 
         if let Some(ids) = allow_ids {

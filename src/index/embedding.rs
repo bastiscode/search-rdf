@@ -198,72 +198,46 @@ pub struct EmbeddingIndex {
 }
 
 impl EmbeddingIndex {
-    fn search_internal<'e, F>(
-        &self,
-        embedding: EmbeddingRef<'e>,
+    pub(crate) fn search(
+        embedding: EmbeddingRef<'_>,
+        index: &Index,
+        metric: Metric,
+        precision: Precision,
+        data: &impl DataSource,
         params: &EmbeddingSearchParams,
-        filter: Option<F>,
-    ) -> Result<Vec<Match>>
-    where
-        F: Fn(u32) -> bool,
-    {
-        let data = &self.inner.data;
-        let index = &self.inner.index;
-        // TODO: should be not needed anymore once bug in usearch is fixed
-        let is_binary = self.inner.metadata.index.precision == Precision::Binary;
+        filter: Option<impl Fn(u64) -> bool>,
+    ) -> Result<Vec<(u64, f32)>> {
+        // TODO: only needed because of usearch bug
+        // with not being able to auto-convert to binary embeddings
+        // remove when fixed in usearch togehter with if is_binary block
+        let is_binary = precision == Precision::Binary;
 
-        let num_dimensions = data.num_dimensions();
+        let num_dimensions = index.dimensions();
         let search_k = params.search_k(data);
-
-        let predicate = filter.map(|f| move |id| f(id as u32));
-
-        if embedding.len() != num_dimensions {
-            return Err(anyhow!(
-                "Query embedding has {} dimensions, expected {}",
-                embedding.len(),
-                num_dimensions
-            ));
-        }
 
         let results = if is_binary {
             let binary_emb = binary_quantization(embedding)?;
             let embedding = b1x8::from_u8s(&binary_emb);
-            if let Some(ref pred) = predicate {
-                if params.exact {
-                    return Err(anyhow!("Exact search with filter is not supported yet"));
-                }
+
+            if let Some(ref pred) = filter {
                 index.filtered_search(embedding, search_k, pred)?
-            } else if params.exact {
-                index.exact_search(embedding, search_k)?
             } else {
                 index.search(embedding, search_k)?
             }
-        } else if let Some(ref pred) = predicate {
-            if params.exact {
-                return Err(anyhow!("Exact search with filter is not supported yet"));
-            }
+        } else if let Some(ref pred) = filter {
             index.filtered_search(embedding, search_k, pred)?
-        } else if params.exact {
-            index.exact_search(embedding, search_k)?
         } else {
             index.search(embedding, search_k)?
         };
 
-        let mut matches: Vec<_> = results
+        Ok(results
             .keys
             .iter()
             .zip(results.distances.iter())
             .filter_map(|(&id, &distance)| {
-                let id = id as u32;
-
                 // usearch returns distances (lower is better) for all metrics.
                 // Convert to a score where higher is better.
-                let score = self
-                    .inner
-                    .metadata
-                    .index
-                    .metric
-                    .to_score(distance, num_dimensions);
+                let score = metric.to_score(distance, num_dimensions);
 
                 // Apply min_score filter
                 if let Some(min_score) = params.min_score
@@ -274,7 +248,29 @@ impl EmbeddingIndex {
 
                 Some((id, score))
             })
-            .collect();
+            .collect())
+    }
+
+    fn search_internal(
+        &self,
+        embedding: EmbeddingRef<'_>,
+        params: &EmbeddingSearchParams,
+        filter: Option<impl Fn(u32) -> bool>,
+    ) -> Result<Vec<Match>> {
+        let data = &self.inner.data;
+        let index = &self.inner.index;
+
+        let predicate = filter.map(|f| move |id| f(id as u32));
+
+        let mut matches = Self::search(
+            embedding,
+            index,
+            self.inner.metadata.index.metric,
+            self.inner.metadata.index.precision,
+            data,
+            params,
+            predicate,
+        )?;
 
         // Deduplicate by ID (keeping the best score for each ID)
         matches.sort_by_key(|&(id, score)| (id, Reverse(OrderedFloat(score))));
@@ -286,7 +282,7 @@ impl EmbeddingIndex {
         // Take top k and create Match objects
         let matches: Vec<Match> = matches
             .into_iter()
-            .map(|(id, score)| Match::Regular(id, score))
+            .map(|(id, score)| Match::Regular(id as u32, score))
             .take(params.k)
             .collect();
 
@@ -324,9 +320,29 @@ pub struct EmbeddingSearchParams {
     pub min_score: Option<f32>,
     #[serde(default, deserialize_with = "deserialize_bool_from_anything")]
     pub exact: bool,
+    #[serde(default, deserialize_with = "deserialize_option_number_from_string")]
+    pub rerank: Option<f32>,
+}
+
+impl EmbeddingSearchParams {
+    pub fn do_rerank(&self) -> bool {
+        self.rerank.is_some()
+    }
 }
 
 impl SearchParamsExt for EmbeddingSearchParams {
+    fn search_k(&self, data: &impl DataSource) -> usize {
+        let mut k = self.k();
+        if let Some(factor) = self.rerank {
+            k = (k as f32 * factor).ceil() as usize;
+        }
+        if self.exact() {
+            k * data.max_fields().max(1) as usize
+        } else {
+            (k as f32 * data.avg_fields()).ceil() as usize
+        }
+    }
+
     fn k(&self) -> usize {
         self.k
     }

@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use log::info;
 use search_rdf::index::embedding::EmbeddingSearchParams;
 use search_rdf::index::keyword::KeywordSearchParams;
-use search_rdf::index::text::embedding::TextEmbeddingSearchParams;
 use search_rdf::index::text::full_text::FullTextSearchParams;
 use serde::Deserialize;
 use serde::de::{IntoDeserializer, value};
@@ -24,7 +23,7 @@ pub enum SearchParams {
     #[serde(rename = "full-text")]
     FullText(FullTextSearchParams),
     #[serde(rename = "text-embedding")]
-    TextEmbedding(TextEmbeddingSearchParams),
+    TextEmbedding(EmbeddingSearchParams),
     Embedding(EmbeddingSearchParams),
 }
 
