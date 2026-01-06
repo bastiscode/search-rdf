@@ -1,10 +1,6 @@
 use std::convert::Infallible;
 
-use crate::data::text::item::jsonl::stream_text_items_from_jsonl_file;
-use crate::data::text::item::sparql::{
-    SPARQLResultFormat, guess_sparql_result_format_from_extension,
-    stream_text_items_from_sparql_result_file,
-};
+use crate::data::text::item::sparql::SPARQLResultFormat;
 use crate::data::text::{TextData as RustTextData, TextEmbeddings as RustTextEmbeddings};
 use crate::data::{DataSource, Precision};
 use anyhow::{Result, anyhow};
@@ -58,28 +54,6 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SPARQLResultFormat {
 
 #[pymethods]
 impl TextData {
-    #[staticmethod]
-    pub fn from_jsonl(data_file: &str, data_dir: &str) -> Result<()> {
-        let items = stream_text_items_from_jsonl_file(data_file.as_ref())?;
-        RustTextData::build(items, data_dir.as_ref())
-    }
-
-    #[staticmethod]
-    #[pyo3(signature = (data_file, data_dir, format = None))]
-    pub fn from_sparql_result(
-        data_file: &str,
-        data_dir: &str,
-        format: Option<SPARQLResultFormat>,
-    ) -> Result<()> {
-        let format = if let Some(format) = format {
-            format
-        } else {
-            guess_sparql_result_format_from_extension(data_file.as_ref())?
-        };
-        let items = stream_text_items_from_sparql_result_file(data_file.as_ref(), format)?;
-        RustTextData::build(items, data_dir.as_ref())
-    }
-
     #[staticmethod]
     pub fn load(data_dir: &str) -> Result<Self> {
         let inner = RustTextData::load(data_dir.as_ref())?;

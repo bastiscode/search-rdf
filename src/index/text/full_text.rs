@@ -68,7 +68,11 @@ pub struct FullTextSearchParams {
         deserialize_with = "deserialize_number_from_string"
     )]
     pub k: usize,
-    #[serde(default, deserialize_with = "deserialize_option_number_from_string")]
+    #[serde(
+        default,
+        rename = "min-score",
+        deserialize_with = "deserialize_option_number_from_string"
+    )]
     pub min_score: Option<f32>,
     #[serde(default, deserialize_with = "deserialize_bool_from_anything")]
     pub exact: bool,

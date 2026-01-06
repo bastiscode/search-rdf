@@ -524,7 +524,11 @@ pub struct KeywordSearchParams {
         deserialize_with = "deserialize_number_from_string"
     )]
     pub k: usize,
-    #[serde(default, deserialize_with = "deserialize_option_number_from_string")]
+    #[serde(
+        default,
+        rename = "min-score",
+        deserialize_with = "deserialize_option_number_from_string"
+    )]
     pub min_score: Option<f32>,
     #[serde(default, deserialize_with = "deserialize_bool_from_anything")]
     pub exact: bool,
@@ -704,7 +708,14 @@ mod tests {
         let index = build_keyword_index(data, &index_dir);
 
         let matches = index
-            .search("agar", &KeywordSearchParams { k: 2, min_score: None, exact: true })
+            .search(
+                "agar",
+                &KeywordSearchParams {
+                    k: 2,
+                    min_score: None,
+                    exact: true,
+                },
+            )
             .expect("Failed to find matches");
         assert_eq!(matches.len(), 2);
         assert!(matches!(matches[0], Match::WithField(0, 0, score) if (score - 1.0).abs() < 1e-6));
@@ -713,7 +724,11 @@ mod tests {
         let matches = index
             .search(
                 "agar agar",
-                &KeywordSearchParams { k: 2, min_score: None, exact: true },
+                &KeywordSearchParams {
+                    k: 2,
+                    min_score: None,
+                    exact: true,
+                },
             )
             .expect("Failed to find matches");
         assert_eq!(matches.len(), 2);
@@ -743,7 +758,11 @@ mod tests {
         let matches = index
             .search(
                 "United States",
-                &KeywordSearchParams { k: 1, min_score: None, exact: true },
+                &KeywordSearchParams {
+                    k: 1,
+                    min_score: None,
+                    exact: true,
+                },
             )
             .expect("Failed to find matches");
 
@@ -753,7 +772,11 @@ mod tests {
         let matches = index
             .search(
                 "United State",
-                &KeywordSearchParams { k: 1, min_score: None, exact: true },
+                &KeywordSearchParams {
+                    k: 1,
+                    min_score: None,
+                    exact: true,
+                },
             )
             .expect("Failed to find matches");
 
@@ -763,7 +786,11 @@ mod tests {
         let matches = index
             .search(
                 "the U.S. of A",
-                &KeywordSearchParams { k: 1, min_score: None, exact: true },
+                &KeywordSearchParams {
+                    k: 1,
+                    min_score: None,
+                    exact: true,
+                },
             )
             .expect("Failed to find matches");
 
@@ -774,7 +801,11 @@ mod tests {
         let matches = index
             .search(
                 "theunitedstates",
-                &KeywordSearchParams { k: 1, min_score: None, exact: true },
+                &KeywordSearchParams {
+                    k: 1,
+                    min_score: None,
+                    exact: true,
+                },
             )
             .expect("Failed to find matches");
 
@@ -895,7 +926,11 @@ mod tests {
         let matches = index
             .search(
                 "specific alpha",
-                &KeywordSearchParams { k: 10, min_score: None, exact: true },
+                &KeywordSearchParams {
+                    k: 10,
+                    min_score: None,
+                    exact: true,
+                },
             )
             .expect("Failed to search");
 
@@ -919,7 +954,11 @@ mod tests {
         let matches = index
             .search(
                 "specific beta",
-                &KeywordSearchParams { k: 10, min_score: None, exact: true },
+                &KeywordSearchParams {
+                    k: 10,
+                    min_score: None,
+                    exact: true,
+                },
             )
             .expect("Failed to search");
 
@@ -942,7 +981,11 @@ mod tests {
         let matches = index
             .search(
                 "specific gamma",
-                &KeywordSearchParams { k: 10, min_score: None, exact: true },
+                &KeywordSearchParams {
+                    k: 10,
+                    min_score: None,
+                    exact: true,
+                },
             )
             .expect("Failed to search");
 
@@ -965,7 +1008,11 @@ mod tests {
         let matches = index
             .search(
                 "specific delta",
-                &KeywordSearchParams { k: 10, min_score: None, exact: true },
+                &KeywordSearchParams {
+                    k: 10,
+                    min_score: None,
+                    exact: true,
+                },
             )
             .expect("Failed to search");
 
@@ -988,7 +1035,11 @@ mod tests {
         let matches = index
             .search(
                 "common",
-                &KeywordSearchParams { k: 10, min_score: None, exact: true },
+                &KeywordSearchParams {
+                    k: 10,
+                    min_score: None,
+                    exact: true,
+                },
             )
             .expect("Failed to search");
 

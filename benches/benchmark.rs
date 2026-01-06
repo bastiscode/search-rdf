@@ -13,7 +13,10 @@ use search_rdf::{
         map::{OrderedDataMap, TrieMap},
         text::item::TextItem,
     },
-    index::{Search, SearchParams, keyword::KeywordIndex},
+    index::{
+        Search,
+        keyword::{KeywordIndex, KeywordSearchParams},
+    },
 };
 
 fn read_tsv_items(tsv_file: &Path) -> Result<Vec<TextItem>> {
@@ -149,7 +152,14 @@ fn bench_keyword_index(c: &mut Criterion) {
                     |b| {
                         b.iter(|| {
                             let _ = index
-                                .search(query, &SearchParams::default().with_k(k).with_exact(exact))
+                                .search(
+                                    query,
+                                    &KeywordSearchParams {
+                                        k,
+                                        exact,
+                                        ..Default::default()
+                                    },
+                                )
                                 .expect("Failed to find matches");
                         })
                     },
@@ -162,7 +172,11 @@ fn bench_keyword_index(c: &mut Criterion) {
                             let _ = index
                                 .search_with_filter(
                                     query,
-                                    &SearchParams::default().with_k(k).with_exact(exact),
+                                    &KeywordSearchParams {
+                                        k,
+                                        exact,
+                                        ..Default::default()
+                                    },
                                     filter,
                                 )
                                 .expect("Failed to find matches");

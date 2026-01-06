@@ -1,6 +1,6 @@
 use crate::data::Embeddings;
 use crate::index::SearchParamsExt;
-use crate::utils::progress_bar;
+use crate::utils::{load_json, progress_bar, write_json};
 use crate::{
     data::{
         DataSource,
@@ -13,8 +13,7 @@ use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::*;
 use std::cmp::Reverse;
-use std::fs::{File, create_dir_all};
-use std::io::BufWriter;
+use std::fs::create_dir_all;
 use std::path::Path;
 use std::sync::Arc;
 use usearch::ffi::IndexOptions;
@@ -84,12 +83,6 @@ impl Metric {
             _ => Metric::CosineNormalized,
         }
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct Metadata {
-    pub index: EmbeddingIndexParams,
-    pub num_dimensions: usize,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -179,7 +172,7 @@ impl Default for EmbeddingIndexParams {
 struct Inner {
     data: Embeddings,
     index: Index,
-    metadata: Metadata,
+    params: EmbeddingIndexParams,
 }
 
 impl std::fmt::Debug for Inner {
@@ -187,7 +180,7 @@ impl std::fmt::Debug for Inner {
         f.debug_struct("Inner")
             .field("data", &self.data)
             .field("index", &"Index { ... }")
-            .field("metadata", &self.metadata)
+            .field("params", &self.params)
             .finish()
     }
 }
@@ -265,8 +258,8 @@ impl EmbeddingIndex {
         let mut matches = Self::search(
             embedding,
             index,
-            self.inner.metadata.index.metric,
-            self.inner.metadata.index.precision,
+            self.inner.params.metric,
+            self.inner.params.precision,
             data,
             params,
             predicate,
@@ -316,7 +309,11 @@ pub struct EmbeddingSearchParams {
         deserialize_with = "deserialize_number_from_string"
     )]
     pub k: usize,
-    #[serde(default, deserialize_with = "deserialize_option_number_from_string")]
+    #[serde(
+        default,
+        rename = "min-score",
+        deserialize_with = "deserialize_option_number_from_string"
+    )]
     pub min_score: Option<f32>,
     #[serde(default, deserialize_with = "deserialize_bool_from_anything")]
     pub exact: bool,
@@ -416,33 +413,26 @@ impl Search for EmbeddingIndex {
         let index_file = index_dir.join("index.usearch");
         index.save(index_file.to_str().ok_or_else(|| anyhow!("Invalid path"))?)?;
 
-        // Save metadata as JSON
-        let metadata = Metadata {
-            index: *params,
-            num_dimensions,
-        };
-        let metadata_file = index_dir.join("index.metadata");
-        let mut writer = BufWriter::new(File::create(&metadata_file)?);
-        serde_json::to_writer_pretty(&mut writer, &metadata)?;
+        // Save params as JSON
+        write_json(&index_dir.join("index.params"), params)?;
 
         Ok(())
     }
 
     fn load(data: Self::Data, index_dir: &Path) -> Result<Self> {
-        // Load metadata from JSON
-        let metadata_file = index_dir.join("index.metadata");
-        let metadata: Metadata = serde_json::from_reader(File::open(&metadata_file)?)?;
+        // Load params from JSON
+        let params: EmbeddingIndexParams = load_json(&index_dir.join("index.params"))?;
 
         // Load the index
         let index_file = index_dir.join("index.usearch");
 
         let options = IndexOptions {
-            dimensions: metadata.num_dimensions,
-            metric: metadata.index.metric.to_usearch_metric(),
-            quantization: metadata.index.precision.to_usearch_scalar_kind(),
-            connectivity: metadata.index.connectivity,
-            expansion_add: metadata.index.expansion_add,
-            expansion_search: metadata.index.expansion_search,
+            dimensions: data.num_dimensions(),
+            metric: params.metric.to_usearch_metric(),
+            quantization: params.precision.to_usearch_scalar_kind(),
+            connectivity: params.connectivity,
+            expansion_add: params.expansion_add,
+            expansion_search: params.expansion_search,
             multi: true, // Enable multi-index to support duplicate IDs
         };
         let index = Index::new(&options)?;
@@ -453,7 +443,7 @@ impl Search for EmbeddingIndex {
             inner: Arc::new(Inner {
                 data,
                 index,
-                metadata,
+                params,
             }),
         })
     }

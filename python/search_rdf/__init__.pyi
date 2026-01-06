@@ -7,16 +7,6 @@ class TextData:
     """Text data source backed by a TSV file."""
 
     @staticmethod
-    def build(data_dir: str) -> None:
-        """
-        Build text data from a data directory.
-
-        Args:
-            data_dir: Directory containing the text data files
-        """
-        ...
-
-    @staticmethod
     def load(data_dir: str) -> TextData:
         """
         Load text data from a directory.
@@ -59,9 +49,7 @@ class TextEmbeddings:
     def __len__(self) -> int: ...
     def is_empty(self) -> bool: ...
     def num_dimensions(self) -> int: ...
-    def precision(self) -> str: ...
     def model(self) -> str: ...
-    def id_from_identifier(self, identifier: str) -> int | None: ...
 
 @final
 class KeywordIndex:
@@ -98,6 +86,7 @@ class KeywordIndex:
         k: int = 10,
         exact: bool = False,
         min_score: float | None = None,
+        allow_ids: set[int] | None = None,
     ) -> list[tuple[int, int, float]]:
         """
         Search the index with a query.
@@ -107,6 +96,7 @@ class KeywordIndex:
             k: Number of results to return (default: 10)
             exact: Use exact search instead of approximate (default: False)
             min_score: Minimum score threshold (optional)
+            allow_ids: Set of document IDs to filter results (optional)
 
         Returns:
             List of (document_id, field_index, score) tuples
@@ -118,7 +108,12 @@ class TextEmbeddingIndex:
     """Embedding-based search index for text data."""
 
     @staticmethod
-    def build(data: TextEmbeddings, index_dir: str, metric: str | None = None) -> None:
+    def build(
+        data: TextEmbeddings,
+        index_dir: str,
+        metric: str | None = None,
+        precision: str | None = None,
+    ) -> None:
         """
         Build an embedding search index.
 
@@ -126,6 +121,7 @@ class TextEmbeddingIndex:
             data: TextEmbeddings to index
             index_dir: Output directory for the index
             metric: Distance metric ("cosine", "inner_product", "ip", "l2", "hamming")
+            precision: Precision ("float32", "binary", "float16", "bfloat16", "int8")
         """
         ...
 
@@ -149,6 +145,8 @@ class TextEmbeddingIndex:
         k: int = 100,
         exact: bool = False,
         min_score: float | None = None,
+        rerank: float | None = None,
+        allow_ids: set[int] | None = None,
     ) -> list[tuple[int, int, float]]:
         """
         Search the index with an embedding vector.
@@ -158,6 +156,8 @@ class TextEmbeddingIndex:
             k: Number of results to return (default: 100)
             exact: Use exact search instead of approximate (default: False)
             min_score: Minimum score threshold (optional)
+            rerank: Reranking factor for oversampling (optional)
+            allow_ids: Set of document IDs to filter results (optional)
 
         Returns:
             List of (document_id, field_index, score) tuples

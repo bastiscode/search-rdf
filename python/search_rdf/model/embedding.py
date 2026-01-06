@@ -1,7 +1,10 @@
 """Text embedding using sentence-transformers."""
 
 import numpy as np
+import torch
+from torch.nn import functional as F
 from sentence_transformers import SentenceTransformer
+from transformers import AutoImageProcessor, AutoModel
 from tqdm import trange
 
 
@@ -31,9 +34,9 @@ class TextEmbeddingModel:
 
         Args:
             texts: List of texts to embed
-            precision: Either 'float32' or 'ubinary'
             embedding_dim: Target embedding dimension (must be <= model dimension)
             batch_size: Batch size for encoding (default: all texts in one batch)
+            normalize: Whether to normalize embeddings to unit length
             show_progress: Whether to show progress bar
 
         Returns:
@@ -81,3 +84,70 @@ class TextEmbeddingModel:
         assert all(t == sorted_texts[i] for t, i in zip(texts, inv_indices))
 
         return embeddings[inv_indices]
+
+
+class ImageEmbeddingModel:
+    """Image embedding model using HuggingFace transformers.
+
+    Args:
+        model: Name or path of the image embedding model
+        device: Device to use for inference ('cuda', 'cpu', or None for auto-detection)
+    """
+
+    def __init__(self, model: str, device: str | None = None):
+        self.model = model
+        self.encoder = AutoModel.from_pretrained(model, dtype="auto", device_map=device)
+        self.device = next(self.encoder.parameters()).device
+        self.encoder.eval()
+        self.dim: int = self.encoder.config.hidden_size
+        self.processor = AutoImageProcessor.from_pretrained(model)
+
+    def embed(
+        self,
+        images: list[np.ndarray],
+        batch_size: int | None = None,
+        normalize: bool = True,
+        show_progress: bool = False,
+    ) -> np.ndarray:
+        """Embed a list of images.
+
+        Args:
+            images: List of images to embed
+            normalize: Whether to normalize embeddings to unit length
+
+        Returns:
+            NumPy array of embeddings with shape (len(images), embedding_dim)
+        """
+        if not images:
+            return np.empty((0, self.dim))
+
+        full_embeddings = []
+        if batch_size is None:
+            batch_size = len(images)
+
+        for i in trange(
+            0,
+            len(images),
+            batch_size,
+            desc="Calculating image embeddings",
+            disable=not show_progress,
+        ):
+            inputs = self.processor(
+                images=images[i : i + batch_size],
+                return_tensors="pt",
+            ).to(self.device)
+
+            with torch.inference_mode():
+                outputs = self.encoder(**inputs)
+
+            # always take the embedding of the first token (typically [CLS])
+            embeddings = outputs.last_hidden_state[:, 0, :]
+
+            if normalize:
+                embeddings = F.normalize(embeddings)
+
+            full_embeddings.append(embeddings.cpu().numpy())
+
+        embeddings = np.vstack(full_embeddings)
+
+        return embeddings.astype(np.float32)

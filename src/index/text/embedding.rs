@@ -1,8 +1,10 @@
 use crate::data::embedding::EmbeddingRef;
 use crate::data::text::embedding::TextEmbeddings;
 use crate::data::{DataSource, Precision};
-use crate::index::embedding::{EmbeddingSearchParams, Metadata, binary_quantization};
-use crate::index::{EmbeddingIndex, EmbeddingIndexParams, Match, Search};
+use crate::index::embedding::{
+    EmbeddingIndex, EmbeddingIndexParams, EmbeddingSearchParams, binary_quantization,
+};
+use crate::index::{Match, Search};
 use crate::utils::{load_json, write_json};
 use crate::utils::{load_u32_vec, progress_bar};
 use anyhow::{Result, anyhow};
@@ -20,7 +22,7 @@ struct Inner {
     data: TextEmbeddings,
     index: Index,
     field_to_data: Vec<u32>,
-    metadata: Metadata,
+    params: EmbeddingIndexParams,
 }
 
 impl std::fmt::Debug for Inner {
@@ -29,7 +31,7 @@ impl std::fmt::Debug for Inner {
             .field("data", &self.data)
             .field("index", &"Index { ... }")
             .field("field_to_data", &self.field_to_data)
-            .field("metadata", &self.metadata)
+            .field("params", &self.params)
             .finish()
     }
 }
@@ -79,8 +81,8 @@ impl TextEmbeddingIndex {
         let matches = EmbeddingIndex::search(
             embedding,
             index,
-            self.inner.metadata.index.metric,
-            self.inner.metadata.index.precision,
+            self.inner.params.metric,
+            self.inner.params.precision,
             data,
             params,
             predicate,
@@ -178,30 +180,26 @@ impl Search for TextEmbeddingIndex {
         let index_file = index_dir.join("index.usearch");
         index.save(index_file.to_str().ok_or_else(|| anyhow!("Invalid path"))?)?;
 
-        // Save metadata as JSON
-        let metadata = Metadata {
-            index: *params,
-            num_dimensions,
-        };
-        write_json(&index_dir.join("index.metadata"), &metadata)?;
+        // Save params as JSON
+        write_json(&index_dir.join("index.params"), params)?;
 
         Ok(())
     }
 
     fn load(data: Self::Data, index_dir: &Path) -> Result<Self> {
-        // Load metadata from JSON
-        let metadata: Metadata = load_json(&index_dir.join("index.metadata"))?;
+        // Load params from JSON
+        let params: EmbeddingIndexParams = load_json(&index_dir.join("index.params"))?;
 
         // Load the index
         let index_file = index_dir.join("index.usearch");
 
         let index = Index::new(&IndexOptions {
-            dimensions: metadata.num_dimensions,
-            metric: metadata.index.metric.to_usearch_metric(),
-            quantization: metadata.index.precision.to_usearch_scalar_kind(),
-            connectivity: metadata.index.connectivity,
-            expansion_add: metadata.index.expansion_add,
-            expansion_search: metadata.index.expansion_search,
+            dimensions: data.num_dimensions(),
+            metric: params.metric.to_usearch_metric(),
+            quantization: params.precision.to_usearch_scalar_kind(),
+            connectivity: params.connectivity,
+            expansion_add: params.expansion_add,
+            expansion_search: params.expansion_search,
             multi: false,
         })?;
 
@@ -214,7 +212,7 @@ impl Search for TextEmbeddingIndex {
                 data,
                 index,
                 field_to_data,
-                metadata,
+                params,
             }),
         })
     }
