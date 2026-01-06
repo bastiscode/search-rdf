@@ -1,11 +1,10 @@
 use anyhow::Result;
 use log::info;
 use search_rdf::data::TextData;
-use search_rdf::data::text::item::TextItem;
-use search_rdf::data::text::item::jsonl::stream_text_items_from_jsonl_file;
-use search_rdf::data::text::item::sparql::{
-    SPARQLResultFormat, stream_text_items_from_sparql_result,
-    stream_text_items_from_sparql_result_file,
+use search_rdf::data::item::Item;
+use search_rdf::data::item::jsonl::stream_items_from_jsonl_file;
+use search_rdf::data::item::sparql::{
+    SPARQLResultFormat, stream_items_from_sparql_result, stream_items_from_sparql_result_file,
 };
 use std::collections::HashMap;
 use std::fs::read_to_string;
@@ -52,18 +51,18 @@ pub fn run(config_path: &Path, force: bool) -> Result<()> {
 }
 
 fn build_text_data(base_dir: &Path, source: &TextSource, output: &Path) -> Result<()> {
-    // Get iterator of TextItems based on source type
-    let items: Box<dyn Iterator<Item = Result<TextItem>>> = match source {
+    // Get iterator of Items based on source type
+    let items: Box<dyn Iterator<Item = Result<Item>>> = match source {
         TextSource::Jsonl { path } => {
             info!("Streaming text data from JSONL file: {}", path.display());
-            Box::new(stream_text_items_from_jsonl_file(path)?)
+            Box::new(stream_items_from_jsonl_file(path)?)
         }
         TextSource::Sparql { path, format } => {
             info!(
                 "Streaming text data from SPARQL result file: {}",
                 path.display()
             );
-            Box::new(stream_text_items_from_sparql_result_file(path, *format)?)
+            Box::new(stream_items_from_sparql_result_file(path, *format)?)
         }
         TextSource::SparqlQuery {
             endpoint,
@@ -86,7 +85,7 @@ fn build_text_data(base_dir: &Path, source: &TextSource, output: &Path) -> Resul
             let response = execute_sparql_query(endpoint, &query, *format, headers.as_ref())?;
 
             // Create iterator from response
-            let items = stream_text_items_from_sparql_result(response, *format)?;
+            let items = stream_items_from_sparql_result(response, *format)?;
 
             Box::new(items)
         }

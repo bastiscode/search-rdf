@@ -245,7 +245,7 @@ impl DataSource for Embeddings {
     }
 
     fn data_type(&self) -> &'static str {
-        "Embeddings"
+        "embedding"
     }
 
     fn total_fields(&self) -> u32 {

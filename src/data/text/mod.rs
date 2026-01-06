@@ -1,11 +1,10 @@
 pub mod embedding;
-pub mod item;
 pub mod python;
 pub use embedding::TextEmbeddings;
 use log::info;
 
+use crate::data::item::Item;
 use crate::data::map::{OrderedDataMap, TrieMap};
-use crate::data::text::item::TextItem;
 
 use super::DataSource;
 use anyhow::{Result, anyhow};
@@ -31,11 +30,11 @@ pub struct TextData {
 impl TextData {
     pub fn identifier(&self, id: u32) -> Option<&str> {
         let range = self.inner.data_map.range(id as usize)?;
-        let (identifier, _) = TextItem::decode_key(&self.inner.data[range]);
+        let (identifier, _) = Item::decode_key(&self.inner.data[range]);
         Some(identifier)
     }
 
-    pub fn build(items: impl IntoIterator<Item = Result<TextItem>>, data_dir: &Path) -> Result<()> {
+    pub fn build(items: impl IntoIterator<Item = Result<Item>>, data_dir: &Path) -> Result<()> {
         create_dir_all(data_dir)?;
 
         let data_file = data_dir.join("data.bin");
@@ -124,22 +123,22 @@ impl DataSource for TextData {
             return None;
         }
         let mut range = self.inner.data_map.range(id as usize)?;
-        let (_, n) = TextItem::decode_key(&self.inner.data[range.clone()]);
+        let (_, n) = Item::decode_key(&self.inner.data[range.clone()]);
         range.start += n;
-        TextItem::decode_values(&self.inner.data[range])
+        Item::decode_values(&self.inner.data[range])
             .nth(field)
             .map(|(value, _)| value)
     }
 
     fn fields(&self, id: u32) -> Option<impl Iterator<Item = Self::Field<'_>>> {
         let mut range = self.inner.data_map.range(id as usize)?;
-        let (_, n) = TextItem::decode_key(&self.inner.data[range.clone()]);
+        let (_, n) = Item::decode_key(&self.inner.data[range.clone()]);
         range.start += n;
-        Some(TextItem::decode_values(&self.inner.data[range]).map(|(value, _)| value))
+        Some(Item::decode_values(&self.inner.data[range]).map(|(value, _)| value))
     }
 
     fn data_type(&self) -> &'static str {
-        "TextData"
+        "text"
     }
 
     fn total_fields(&self) -> u32 {
@@ -171,21 +170,21 @@ mod tests {
 
         // Create test data: identifier -> fields
         let items = vec![
-            Ok(TextItem::new(
+            Ok(Item::new(
                 "Q1".to_string(),
                 vec!["Universe".to_string(), "Cosmos".to_string()],
             )
-            .expect("Failed to create TextItem")),
-            Ok(TextItem::new(
+            .expect("Failed to create Item")),
+            Ok(Item::new(
                 "Q2".to_string(),
                 vec!["Earth".to_string(), "World".to_string()],
             )
-            .expect("Failed to create TextItem")),
-            Ok(TextItem::new(
+            .expect("Failed to create Item")),
+            Ok(Item::new(
                 "Q3".to_string(),
                 vec!["Human".to_string(), "Person".to_string()],
             )
-            .expect("Failed to create TextItem")),
+            .expect("Failed to create Item")),
         ];
 
         // Build and load

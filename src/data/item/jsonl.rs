@@ -5,29 +5,27 @@ use std::{
     path::Path,
 };
 
-use crate::data::text::item::TextItem;
+use crate::data::item::Item;
 
-pub fn stream_text_items_from_jsonl<R: Read>(
-    reader: R,
-) -> Result<impl Iterator<Item = Result<TextItem>>> {
+pub fn stream_items_from_jsonl<R: Read>(reader: R) -> Result<impl Iterator<Item = Result<Item>>> {
     let buffered = BufReader::new(reader);
     let iter = buffered.lines().map(|line| {
         let line = line?;
-        let text_item: TextItem = serde_json::from_str(&line)?;
-        text_item.validate()
+        let item: Item = serde_json::from_str(&line)?;
+        item.validate()
     });
     Ok(iter)
 }
 
-pub fn stream_text_items_from_jsonl_file(
+pub fn stream_items_from_jsonl_file(
     file_path: &Path,
-) -> Result<impl Iterator<Item = Result<TextItem>>> {
+) -> Result<impl Iterator<Item = Result<Item>>> {
     let reader = BufReader::new(File::open(file_path)?);
-    stream_text_items_from_jsonl(reader)
+    stream_items_from_jsonl(reader)
 }
 
 #[test]
-fn test_stream_text_items_from_jsonl() {
+fn test_stream_items_from_jsonl() {
     use std::io::Cursor;
 
     let jsonl_data = r#"{"identifier":"Q1","fields":["Universe","Cosmos"]}
@@ -35,7 +33,7 @@ fn test_stream_text_items_from_jsonl() {
 {"identifier":"Q3","fields":["Human"]}"#;
 
     let cursor = Cursor::new(jsonl_data);
-    let items: Vec<_> = stream_text_items_from_jsonl(cursor)
+    let items: Vec<_> = stream_items_from_jsonl(cursor)
         .expect("Failed to create iterator")
         .collect::<Result<Vec<_>>>()
         .expect("Failed to parse JSONL");
@@ -50,7 +48,7 @@ fn test_stream_text_items_from_jsonl() {
 }
 
 #[test]
-fn test_stream_text_items_from_jsonl_file() {
+fn test_stream_items_from_jsonl_file() {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -66,7 +64,7 @@ fn test_stream_text_items_from_jsonl_file() {
     )
     .expect("Failed to write");
 
-    let items: Vec<_> = stream_text_items_from_jsonl_file(temp_file.path())
+    let items: Vec<_> = stream_items_from_jsonl_file(temp_file.path())
         .expect("Failed to create iterator")
         .collect::<Result<Vec<_>>>()
         .expect("Failed to read JSONL file");

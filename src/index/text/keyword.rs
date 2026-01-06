@@ -675,8 +675,8 @@ impl Search for KeywordIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::item::Item as DataItem;
     use crate::data::text::TextData;
-    use crate::data::text::item::TextItem;
     use std::fs::create_dir_all;
     use tempfile::tempdir;
 
@@ -694,11 +694,11 @@ mod tests {
 
         // Create test data: id -> labels
         let items = vec![
-            Ok(TextItem::new("0".to_string(), vec!["agar".to_string()])
-                .expect("Failed to create TextItem")),
+            Ok(DataItem::new("0".to_string(), vec!["agar".to_string()])
+                .expect("Failed to create Item")),
             Ok(
-                TextItem::new("1".to_string(), vec!["agar agar".to_string()])
-                    .expect("Failed to create TextItem"),
+                DataItem::new("1".to_string(), vec!["agar agar".to_string()])
+                    .expect("Failed to create Item"),
             ),
         ];
 
@@ -743,11 +743,11 @@ mod tests {
         let index_dir = temp_dir.path().join("index");
 
         // Create simple test data
-        let items = vec![Ok(TextItem::new(
+        let items = vec![Ok(DataItem::new(
             "Q30".to_string(),
             vec!["United States".to_string(), "the U.S. of A".to_string()],
         )
-        .expect("Failed to create TextItem"))];
+        .expect("Failed to create Item"))];
 
         TextData::build(items, &data_dir).expect("Failed to build data");
         let data = TextData::load(&data_dir).expect("Failed to load data");
@@ -898,7 +898,7 @@ mod tests {
         // Entity 0: ["common label", "specific alpha", "specific beta"]
         // Entity 1: ["common label", "specific gamma", "specific delta"]
         let items = vec![
-            Ok(TextItem::new(
+            Ok(DataItem::new(
                 "Entity0".to_string(),
                 vec![
                     "common label".to_string(),
@@ -906,8 +906,8 @@ mod tests {
                     "specific beta".to_string(),
                 ],
             )
-            .expect("Failed to create TextItem")),
-            Ok(TextItem::new(
+            .expect("Failed to create Item")),
+            Ok(DataItem::new(
                 "Entity1".to_string(),
                 vec![
                     "common label".to_string(),
@@ -915,7 +915,7 @@ mod tests {
                     "specific delta".to_string(),
                 ],
             )
-            .expect("Failed to create TextItem")),
+            .expect("Failed to create Item")),
         ];
 
         TextData::build(items, &data_dir).expect("Failed to build data");

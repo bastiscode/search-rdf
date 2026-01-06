@@ -1,4 +1,5 @@
 pub mod embedding;
+pub mod item;
 pub mod map;
 pub mod text;
 

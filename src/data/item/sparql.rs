@@ -17,7 +17,7 @@ use sparesults::{
     ReaderQueryResultsParserOutput,
 };
 
-use crate::data::text::item::TextItem;
+use crate::data::item::Item;
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -119,7 +119,7 @@ impl<I> Iterator for SPARQLResultIterator<I>
 where
     I: Iterator<Item = Result<QuerySolution, QueryResultsParseError>>,
 {
-    type Item = Result<TextItem>;
+    type Item = Result<Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
         for result in self.inner.by_ref() {
@@ -148,20 +148,20 @@ where
             let identifier = self.identifier.replace(identifier)?;
             let fields = take(&mut self.fields);
             self.fields.push(field);
-            return Some(TextItem::new(identifier, fields));
+            return Some(Item::new(identifier, fields));
         }
 
         let identifier = self.identifier.take()?;
         let fields = take(&mut self.fields);
 
-        Some(TextItem::new(identifier, fields))
+        Some(Item::new(identifier, fields))
     }
 }
 
-pub fn stream_text_items_from_sparql_result<R: Read>(
+pub fn stream_items_from_sparql_result<R: Read>(
     reader: R,
     format: SPARQLResultFormat,
-) -> Result<impl Iterator<Item = Result<TextItem>>> {
+) -> Result<impl Iterator<Item = Result<Item>>> {
     let json_parser = QueryResultsParser::from_format(format.into());
 
     let parser = json_parser
@@ -175,12 +175,12 @@ pub fn stream_text_items_from_sparql_result<R: Read>(
     Ok(SPARQLResultIterator::new(solutions))
 }
 
-pub fn stream_text_items_from_sparql_result_file(
+pub fn stream_items_from_sparql_result_file(
     file_path: &Path,
     format: SPARQLResultFormat,
-) -> Result<impl Iterator<Item = Result<TextItem>>> {
+) -> Result<impl Iterator<Item = Result<Item>>> {
     let reader = BufReader::new(File::open(file_path)?);
-    stream_text_items_from_sparql_result(reader, format)
+    stream_items_from_sparql_result(reader, format)
 }
 
 pub fn guess_sparql_result_format_from_extension(file_path: &Path) -> Result<SPARQLResultFormat> {
@@ -229,7 +229,7 @@ mod tests {
         }"#;
 
         let cursor = Cursor::new(sparql_json);
-        let items: Vec<_> = stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
+        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
             .expect("Failed to create iterator")
             .collect::<Result<Vec<_>>>()
             .expect("Failed to parse SPARQL JSON");
@@ -266,7 +266,7 @@ mod tests {
         }"#;
 
         let cursor = Cursor::new(sparql_json);
-        let items: Vec<_> = stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
+        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
             .expect("Failed to create iterator")
             .collect::<Result<Vec<_>>>()
             .expect("Failed to parse SPARQL JSON");
@@ -290,7 +290,7 @@ mod tests {
         }"#;
 
         let cursor = Cursor::new(sparql_json);
-        let items: Vec<_> = stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
+        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
             .expect("Failed to create iterator")
             .collect::<Result<Vec<_>>>()
             .expect("Failed to parse SPARQL JSON");
@@ -315,7 +315,7 @@ mod tests {
 
         let cursor = Cursor::new(sparql_json);
         let result: Result<Vec<_>> =
-            stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
                 .expect("Failed to create iterator")
                 .collect();
 
@@ -344,7 +344,7 @@ mod tests {
 
         let cursor = Cursor::new(sparql_json);
         let result: Result<Vec<_>> =
-            stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
                 .expect("Failed to create iterator")
                 .collect();
 
@@ -378,7 +378,7 @@ mod tests {
 </sparql>"#;
 
         let cursor = Cursor::new(sparql_xml);
-        let items: Vec<_> = stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::XML)
+        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::XML)
             .expect("Failed to create iterator")
             .collect::<Result<Vec<_>>>()
             .expect("Failed to parse SPARQL XML");
@@ -417,7 +417,7 @@ mod tests {
 </sparql>"#;
 
         let cursor = Cursor::new(sparql_xml);
-        let items: Vec<_> = stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::XML)
+        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::XML)
             .expect("Failed to create iterator")
             .collect::<Result<Vec<_>>>()
             .expect("Failed to parse SPARQL XML");
@@ -439,7 +439,7 @@ mod tests {
             <http://example.org/Q2>\t\"Earth\"";
 
         let cursor = Cursor::new(sparql_tsv);
-        let items: Vec<_> = stream_text_items_from_sparql_result(cursor, SPARQLResultFormat::TSV)
+        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::TSV)
             .expect("Failed to create iterator")
             .collect::<Result<Vec<_>>>()
             .expect("Failed to parse SPARQL TSV");

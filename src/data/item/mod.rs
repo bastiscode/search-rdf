@@ -8,12 +8,12 @@ const U16_SIZE: usize = size_of::<u16>();
 const U32_SIZE: usize = size_of::<u32>();
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TextItem {
+pub struct Item {
     pub identifier: String,
     pub fields: Vec<String>,
 }
 
-impl TextItem {
+impl Item {
     pub fn validate(self) -> Result<Self> {
         if self.identifier.len() > u32::MAX as usize {
             return Err(anyhow!("identifier length exceeds maximum of {}", u32::MAX));
@@ -33,7 +33,7 @@ impl TextItem {
     }
 
     pub fn new(identifier: String, fields: Vec<String>) -> Result<Self> {
-        let item = TextItem { identifier, fields };
+        let item = Item { identifier, fields };
         item.validate()
     }
 
@@ -102,12 +102,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_text_item_creation_valid() {
-        let item = TextItem::new(
+    fn test_item_creation_valid() {
+        let item = Item::new(
             "Q1".to_string(),
             vec!["field1".to_string(), "field2".to_string()],
         )
-        .expect("Failed to create TextItem");
+        .expect("Failed to create Item");
 
         assert_eq!(item.identifier, "Q1");
         assert_eq!(item.fields.len(), 2);
@@ -115,9 +115,9 @@ mod tests {
     }
 
     #[test]
-    fn test_text_item_creation_empty_fields() {
-        let item = TextItem::new("Q1".to_string(), vec![])
-            .expect("Failed to create TextItem with empty fields");
+    fn test_item_creation_empty_fields() {
+        let item =
+            Item::new("Q1".to_string(), vec![]).expect("Failed to create Item with empty fields");
 
         assert_eq!(item.identifier, "Q1");
         assert_eq!(item.fields.len(), 0);
@@ -125,18 +125,18 @@ mod tests {
     }
 
     #[test]
-    fn test_text_item_creation_single_field() {
-        let item = TextItem::new("Q1".to_string(), vec!["single".to_string()])
-            .expect("Failed to create TextItem with single field");
+    fn test_item_creation_single_field() {
+        let item = Item::new("Q1".to_string(), vec!["single".to_string()])
+            .expect("Failed to create Item with single field");
 
         assert_eq!(item.fields.len(), 1);
         assert_eq!(item.num_fields(), 1);
     }
 
     #[test]
-    fn test_text_item_identifier_too_long() {
+    fn test_item_identifier_too_long() {
         let long_id = "a".repeat((u32::MAX as usize) + 1);
-        let result = TextItem::new(long_id, vec!["field".to_string()]);
+        let result = Item::new(long_id, vec!["field".to_string()]);
 
         assert!(result.is_err());
         assert!(
@@ -148,9 +148,9 @@ mod tests {
     }
 
     #[test]
-    fn test_text_item_too_many_fields() {
+    fn test_item_too_many_fields() {
         let fields = vec!["field".to_string(); (u16::MAX as usize) + 1];
-        let result = TextItem::new("Q1".to_string(), fields);
+        let result = Item::new("Q1".to_string(), fields);
 
         assert!(result.is_err());
         assert!(
@@ -162,9 +162,9 @@ mod tests {
     }
 
     #[test]
-    fn test_text_item_field_too_long() {
+    fn test_item_field_too_long() {
         let long_field = "a".repeat((u32::MAX as usize) + 1);
-        let result = TextItem::new("Q1".to_string(), vec![long_field]);
+        let result = Item::new("Q1".to_string(), vec![long_field]);
 
         assert!(result.is_err());
         assert!(
@@ -176,8 +176,8 @@ mod tests {
     }
 
     #[test]
-    fn test_text_item_encode_decode_roundtrip() {
-        let item = TextItem::new(
+    fn test_item_encode_decode_roundtrip() {
+        let item = Item::new(
             "Q42".to_string(),
             vec![
                 "Douglas Adams".to_string(),
@@ -185,16 +185,16 @@ mod tests {
                 "42".to_string(),
             ],
         )
-        .expect("Failed to create TextItem");
+        .expect("Failed to create Item");
 
         let encoded = item.encode();
 
         // Decode identifier
-        let (decoded_id, id_end) = TextItem::decode_key(&encoded);
+        let (decoded_id, id_end) = Item::decode_key(&encoded);
         assert_eq!(decoded_id, "Q42");
 
         // Decode fields
-        let decoded_fields: Vec<&str> = TextItem::decode_values(&encoded[id_end..])
+        let decoded_fields: Vec<&str> = Item::decode_values(&encoded[id_end..])
             .map(|(s, _)| s)
             .collect();
 
@@ -205,17 +205,17 @@ mod tests {
     }
 
     #[test]
-    fn test_text_item_encode_decode_empty_fields() {
-        let item = TextItem::new("Q1".to_string(), vec![]).expect("Failed to create TextItem");
+    fn test_item_encode_decode_empty_fields() {
+        let item = Item::new("Q1".to_string(), vec![]).expect("Failed to create Item");
 
         let encoded = item.encode();
 
         // Decode identifier
-        let (decoded_id, id_end) = TextItem::decode_key(&encoded);
+        let (decoded_id, id_end) = Item::decode_key(&encoded);
         assert_eq!(decoded_id, "Q1");
 
         // Decode fields
-        let decoded_fields: Vec<&str> = TextItem::decode_values(&encoded[id_end..])
+        let decoded_fields: Vec<&str> = Item::decode_values(&encoded[id_end..])
             .map(|(s, _)| s)
             .collect();
 
@@ -223,8 +223,8 @@ mod tests {
     }
 
     #[test]
-    fn test_text_item_encode_decode_special_characters() {
-        let item = TextItem::new(
+    fn test_item_encode_decode_special_characters() {
+        let item = Item::new(
             "Q1".to_string(),
             vec![
                 "Hello, World!".to_string(),
@@ -233,16 +233,16 @@ mod tests {
                 "Symbols: @#$%^&*()".to_string(),
             ],
         )
-        .expect("Failed to create TextItem");
+        .expect("Failed to create Item");
 
         let encoded = item.encode();
 
         // Decode identifier
-        let (decoded_id, id_end) = TextItem::decode_key(&encoded);
+        let (decoded_id, id_end) = Item::decode_key(&encoded);
         assert_eq!(decoded_id, "Q1");
 
         // Decode fields
-        let decoded_fields: Vec<&str> = TextItem::decode_values(&encoded[id_end..])
+        let decoded_fields: Vec<&str> = Item::decode_values(&encoded[id_end..])
             .map(|(s, _)| s)
             .collect();
 
@@ -254,21 +254,21 @@ mod tests {
     }
 
     #[test]
-    fn test_text_item_encode_decode_empty_strings() {
-        let item = TextItem::new(
+    fn test_item_encode_decode_empty_strings() {
+        let item = Item::new(
             "Q1".to_string(),
             vec!["".to_string(), "non-empty".to_string(), "".to_string()],
         )
-        .expect("Failed to create TextItem");
+        .expect("Failed to create Item");
 
         let encoded = item.encode();
 
         // Decode identifier
-        let (decoded_id, id_end) = TextItem::decode_key(&encoded);
+        let (decoded_id, id_end) = Item::decode_key(&encoded);
         assert_eq!(decoded_id, "Q1");
 
         // Decode fields
-        let decoded_fields: Vec<&str> = TextItem::decode_values(&encoded[id_end..])
+        let decoded_fields: Vec<&str> = Item::decode_values(&encoded[id_end..])
             .map(|(s, _)| s)
             .collect();
 
@@ -280,18 +280,18 @@ mod tests {
 
     #[test]
     fn test_decode_values_size_tracking() {
-        let item = TextItem::new(
+        let item = Item::new(
             "Q1".to_string(),
             vec!["short".to_string(), "medium-length".to_string()],
         )
-        .expect("Failed to create TextItem");
+        .expect("Failed to create Item");
 
         let encoded = item.encode();
-        let (_, id_end) = TextItem::decode_key(&encoded);
+        let (_, id_end) = Item::decode_key(&encoded);
 
         // Verify that sizes are correctly tracked
         let values_with_sizes: Vec<(&str, usize)> =
-            TextItem::decode_values(&encoded[id_end..]).collect();
+            Item::decode_values(&encoded[id_end..]).collect();
 
         assert_eq!(values_with_sizes.len(), 2);
 
@@ -305,9 +305,9 @@ mod tests {
     }
 
     #[test]
-    fn test_text_item_encode_format() {
-        let item = TextItem::new("Q1".to_string(), vec!["field1".to_string()])
-            .expect("Failed to create TextItem");
+    fn test_item_encode_format() {
+        let item =
+            Item::new("Q1".to_string(), vec!["field1".to_string()]).expect("Failed to create Item");
 
         let encoded = item.encode();
 
@@ -342,10 +342,10 @@ mod tests {
     }
 
     #[test]
-    fn test_text_item_max_valid_sizes() {
+    fn test_item_max_valid_sizes() {
         // Test with maximum valid number of fields (u16::MAX)
         let max_fields = vec!["field".to_string(); u16::MAX as usize];
-        let result = TextItem::new("Q1".to_string(), max_fields);
+        let result = Item::new("Q1".to_string(), max_fields);
         assert!(result.is_ok());
     }
 }

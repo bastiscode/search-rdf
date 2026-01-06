@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use search_rdf::data::text::item::sparql::SPARQLResultFormat;
+use search_rdf::data::item::sparql::SPARQLResultFormat;
 use search_rdf::index::EmbeddingIndexParams;
 use search_rdf::model::EmbeddingParams;
 use serde::{Deserialize, Serialize};

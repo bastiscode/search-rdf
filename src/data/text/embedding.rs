@@ -85,7 +85,7 @@ impl DataSource for TextEmbeddings {
     }
 
     fn data_type(&self) -> &'static str {
-        "TextEmbeddings"
+        "text-embedding"
     }
 
     fn total_fields(&self) -> u32 {
@@ -104,7 +104,7 @@ impl DataSource for TextEmbeddings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::text::item::TextItem;
+    use crate::data::item::Item;
     use std::collections::HashMap;
     use tempfile::tempdir;
 
@@ -148,21 +148,21 @@ mod tests {
 
         // Create test data (3 rows, 2 fields each = 6 total fields)
         let items = vec![
-            Ok(TextItem::new(
+            Ok(Item::new(
                 "Q1".to_string(),
                 vec!["Universe".to_string(), "Cosmos".to_string()],
             )
-            .expect("Failed to create TextItem")),
-            Ok(TextItem::new(
+            .expect("Failed to create Item")),
+            Ok(Item::new(
                 "Q2".to_string(),
                 vec!["Earth".to_string(), "World".to_string()],
             )
-            .expect("Failed to create TextItem")),
-            Ok(TextItem::new(
+            .expect("Failed to create Item")),
+            Ok(Item::new(
                 "Q3".to_string(),
                 vec!["Human".to_string(), "Person".to_string()],
             )
-            .expect("Failed to create TextItem")),
+            .expect("Failed to create Item")),
         ];
 
         // Build TextData

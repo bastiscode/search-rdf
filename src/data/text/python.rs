@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use crate::data::text::item::sparql::SPARQLResultFormat;
+use crate::data::item::sparql::SPARQLResultFormat;
 use crate::data::text::{TextData as RustTextData, TextEmbeddings as RustTextEmbeddings};
 use crate::data::{DataSource, Precision};
 use anyhow::{Result, anyhow};

@@ -246,7 +246,7 @@ impl Search for TextEmbeddingIndex {
 mod tests {
     use super::*;
     use crate::data::Precision;
-    use crate::data::text::item::TextItem;
+    use crate::data::item::Item;
     use crate::data::text::{TextData, embedding::TextEmbeddings};
     use crate::index::EmbeddingIndexParams;
     use crate::index::embedding::Metric;
@@ -301,18 +301,18 @@ mod tests {
 
         // Create test data with varying field counts: 1, 3, 2 (max=3)
         let items = vec![
-            Ok(TextItem::new("Q1".to_string(), vec!["Cat".to_string()])
-                .expect("Failed to create TextItem")),
-            Ok(TextItem::new(
+            Ok(Item::new("Q1".to_string(), vec!["Cat".to_string()])
+                .expect("Failed to create Item")),
+            Ok(Item::new(
                 "Q2".to_string(),
                 vec!["Dog".to_string(), "Canine".to_string(), "Hound".to_string()],
             )
-            .expect("Failed to create TextItem")),
-            Ok(TextItem::new(
+            .expect("Failed to create Item")),
+            Ok(Item::new(
                 "Q3".to_string(),
                 vec!["Bird".to_string(), "Avian".to_string()],
             )
-            .expect("Failed to create TextItem")),
+            .expect("Failed to create Item")),
         ];
 
         // Build TextData
@@ -452,10 +452,8 @@ mod tests {
         let data_dir_ip = temp_dir.path().join("data_ip");
 
         let items_ip = vec![
-            Ok(TextItem::new("Q1".to_string(), vec!["A".to_string()])
-                .expect("Failed to create TextItem")),
-            Ok(TextItem::new("Q2".to_string(), vec!["B".to_string()])
-                .expect("Failed to create TextItem")),
+            Ok(Item::new("Q1".to_string(), vec!["A".to_string()]).expect("Failed to create Item")),
+            Ok(Item::new("Q2".to_string(), vec!["B".to_string()]).expect("Failed to create Item")),
         ];
 
         TextData::build(items_ip, &data_dir_ip).expect("Failed to build TextData");
@@ -518,10 +516,8 @@ mod tests {
         let data_dir_hamming = temp_dir.path().join("data_hamming");
 
         let items_hamming = vec![
-            Ok(TextItem::new("Q1".to_string(), vec!["A".to_string()])
-                .expect("Failed to create TextItem")),
-            Ok(TextItem::new("Q2".to_string(), vec!["B".to_string()])
-                .expect("Failed to create TextItem")),
+            Ok(Item::new("Q1".to_string(), vec!["A".to_string()]).expect("Failed to create Item")),
+            Ok(Item::new("Q2".to_string(), vec!["B".to_string()]).expect("Failed to create Item")),
         ];
 
         TextData::build(items_hamming, &data_dir_hamming).expect("Failed to build TextData");
@@ -581,7 +577,7 @@ mod tests {
 
         // Create test data where each item has 3 fields with distinct embeddings
         let items = vec![
-            Ok(TextItem::new(
+            Ok(Item::new(
                 "Entity1".to_string(),
                 vec![
                     "FieldA".to_string(),
@@ -589,8 +585,8 @@ mod tests {
                     "FieldC".to_string(),
                 ],
             )
-            .expect("Failed to create TextItem")),
-            Ok(TextItem::new(
+            .expect("Failed to create Item")),
+            Ok(Item::new(
                 "Entity2".to_string(),
                 vec![
                     "FieldX".to_string(),
@@ -598,7 +594,7 @@ mod tests {
                     "FieldZ".to_string(),
                 ],
             )
-            .expect("Failed to create TextItem")),
+            .expect("Failed to create Item")),
         ];
 
         TextData::build(items, &data_dir).expect("Failed to build TextData");

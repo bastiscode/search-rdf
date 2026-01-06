@@ -11,7 +11,7 @@ use search_rdf::{
     data::{
         DataSource, TextData,
         map::{OrderedDataMap, TrieMap},
-        text::item::TextItem,
+        text::item::Item,
     },
     index::{
         Search,
@@ -19,7 +19,7 @@ use search_rdf::{
     },
 };
 
-fn read_tsv_items(tsv_file: &Path) -> Result<Vec<TextItem>> {
+fn read_tsv_items(tsv_file: &Path) -> Result<Vec<Item>> {
     let file = File::open(tsv_file)?;
     let reader = BufReader::new(file);
 
@@ -30,7 +30,7 @@ fn read_tsv_items(tsv_file: &Path) -> Result<Vec<TextItem>> {
 
         if let Some(identifier) = parts.next() {
             let fields: Vec<String> = parts.map(|s| s.to_string()).collect();
-            let item = TextItem::new(identifier.to_string(), fields)?;
+            let item = Item::new(identifier.to_string(), fields)?;
             items.push(item);
         }
     }
