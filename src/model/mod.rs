@@ -1,5 +1,6 @@
 use crate::{
     data::embedding::Embedding,
+    model::image::huggingface::HuggingFaceImageModel,
     model::text::{sentence_transformer::SentenceTransformer, vllm::VLLM},
 };
 use anyhow::Result;
@@ -12,6 +13,7 @@ pub mod text;
 pub enum EmbeddingModel {
     SentenceTransformer(SentenceTransformer),
     Vllm(VLLM),
+    HuggingFaceImage(HuggingFaceImageModel),
 }
 
 impl EmbeddingModel {
@@ -19,6 +21,7 @@ impl EmbeddingModel {
         match self {
             EmbeddingModel::SentenceTransformer(m) => m.model_name(),
             EmbeddingModel::Vllm(m) => m.model_name(),
+            EmbeddingModel::HuggingFaceImage(m) => m.model_name(),
         }
     }
 
@@ -26,6 +29,7 @@ impl EmbeddingModel {
         match self {
             EmbeddingModel::SentenceTransformer(m) => m.model_type(),
             EmbeddingModel::Vllm(m) => m.model_type(),
+            EmbeddingModel::HuggingFaceImage(m) => m.model_type(),
         }
     }
 
@@ -33,6 +37,7 @@ impl EmbeddingModel {
         match self {
             EmbeddingModel::SentenceTransformer(..) => None,
             EmbeddingModel::Vllm(m) => Some(m.max_model_len()),
+            EmbeddingModel::HuggingFaceImage(..) => None,
         }
     }
 
@@ -40,6 +45,7 @@ impl EmbeddingModel {
         match self {
             EmbeddingModel::SentenceTransformer(m) => m.num_dimensions(),
             EmbeddingModel::Vllm(m) => m.num_dimensions(),
+            EmbeddingModel::HuggingFaceImage(m) => m.num_dimensions(),
         }
     }
 }

@@ -2,9 +2,10 @@ use anyhow::{Context, Result, anyhow};
 use itertools::Itertools;
 use log::info;
 use memmap2::Mmap;
+use numpy::ndarray::Array3;
 use safetensors::serialize_to_file;
 use safetensors::tensor::{Dtype, TensorView};
-use search_rdf::data::item::FieldRef;
+use search_rdf::data::item::{FieldRef, load_image_ndarray_from_bytes};
 use search_rdf::model::Embed;
 use std::collections::HashMap;
 use std::fs::{File, create_dir_all, remove_file};
@@ -16,7 +17,7 @@ use search_rdf::data::DataSource;
 use search_rdf::model::{EmbeddingModel, EmbeddingParams};
 use search_rdf::utils::progress_bar;
 
-use crate::search_rdf::config::{Config, EmbeddingDatasetConfig};
+use crate::search_rdf::config::Config;
 use crate::search_rdf::model::load_model;
 
 pub fn run(config_path: &Path, force: bool) -> Result<()> {
@@ -79,21 +80,14 @@ pub fn run(config_path: &Path, force: bool) -> Result<()> {
 
         info!("[BUILD] {}...", embed_config.name);
 
-        match &embed_config.dataset {
-            EmbeddingDatasetConfig::Text {
-                dataset,
-                batch_size,
-            } => {
-                build_embeddings(
-                    config_dir,
-                    dataset,
-                    &embed_config.output,
-                    *batch_size,
-                    params,
-                    model,
-                )?;
-            }
-        }
+        build_embeddings(
+            config_dir,
+            &embed_config.data,
+            &embed_config.output,
+            embed_config.batch_size,
+            params,
+            model,
+        )?;
 
         info!(
             "[OK] {} -> {}",
@@ -112,7 +106,28 @@ fn get_text_fields<'f>(fields: &[FieldRef<'f>]) -> Result<Vec<&'f str>> {
             if f.is_text() {
                 Ok(f.as_str())
             } else {
-                Err(anyhow!("Non-text field encountered for embedding"))
+                Err(anyhow!(
+                    "Expected text field for text embedding model, but found {:?}",
+                    f
+                ))
+            }
+        })
+        .collect()
+}
+
+fn get_image_fields(fields: &[FieldRef]) -> Result<Vec<Array3<u8>>> {
+    fields
+        .iter()
+        .map(|f| {
+            if f.is_image() {
+                // Load image data (handles both Image and ImageInline)
+                let bytes = f.load_data().context("Failed to load image data")?;
+                load_image_ndarray_from_bytes(&bytes)
+                    .context("Failed to convert image bytes to array")
+            } else {
+                Err(anyhow!(
+                    "Expected image field for image embedding model, but found text field"
+                ))
             }
         })
         .collect()
@@ -126,14 +141,14 @@ fn build_embeddings(
     params: &EmbeddingParams,
     model: &EmbeddingModel,
 ) -> Result<()> {
-    // Load text data
-    let text_data = Data::load(&base_dir.join(dataset))
+    // Load data
+    let data = Data::load(&base_dir.join(dataset))
         .context(format!("Failed to load data from: {}", dataset.display()))?;
 
-    info!("Loaded {} items", text_data.len());
+    info!("Loaded {} items", data.len());
     info!(
         "Embedding {} fields with batch size {}...",
-        text_data.total_fields(),
+        data.total_fields(),
         batch_size
     );
 
@@ -173,15 +188,18 @@ fn build_embeddings(
 
     let pb = progress_bar(
         "Generating embeddings",
-        Some(text_data.total_fields() as u64 - skip as u64),
+        Some(data.total_fields() as u64 - skip as u64),
     )?;
-    for chunk in &text_data
+
+    for chunk in &data
         .items()
         .flat_map(|(_, fields)| fields)
         .skip(skip)
         .chunks(batch_size)
     {
         let chunk: Vec<_> = chunk.collect();
+
+        // Embed based on model type and field types
         let embeddings = match model {
             EmbeddingModel::SentenceTransformer(m) => {
                 let texts = get_text_fields(&chunk)?;
@@ -191,7 +209,12 @@ fn build_embeddings(
                 let texts = get_text_fields(&chunk)?;
                 m.embed(&texts, params)?
             }
+            EmbeddingModel::HuggingFaceImage(m) => {
+                let images = get_image_fields(&chunk)?;
+                m.embed(&images, params)?
+            }
         };
+
         pb.inc(embeddings.len() as u64);
         embeddings
             .into_iter()
@@ -209,7 +232,7 @@ fn build_embeddings(
     // Create tensors
     let embedding_tensor = TensorView::new(
         Dtype::F32,
-        vec![text_data.total_fields() as usize, model.num_dimensions()],
+        vec![data.total_fields() as usize, model.num_dimensions()],
         &temp_bytes,
     )?;
 

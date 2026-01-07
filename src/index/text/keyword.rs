@@ -682,7 +682,10 @@ impl Search for KeywordIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::{Data, item::{FieldType, Item as DataItem, StringField}};
+    use crate::data::{
+        Data,
+        item::{FieldType, Item as DataItem, StringField},
+    };
     use std::fs::create_dir_all;
     use tempfile::tempdir;
 

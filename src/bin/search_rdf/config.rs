@@ -77,6 +77,14 @@ pub enum ModelType {
         #[serde(default = "default_st_batch_size")]
         batch_size: usize,
     },
+    #[serde(rename = "huggingface-image")]
+    HuggingFaceImage {
+        model_name: String,
+        #[serde(default = "default_device")]
+        device: String,
+        #[serde(default = "default_st_batch_size")]
+        batch_size: usize,
+    },
 }
 
 fn default_device() -> String {
@@ -92,18 +100,9 @@ pub struct EmbeddingConfig {
     pub name: String,
     pub output: PathBuf,
     pub model: String,
-    #[serde(flatten)]
-    pub dataset: EmbeddingDatasetConfig,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EmbeddingDatasetConfig {
-    Text {
-        dataset: PathBuf,
-        #[serde(default = "default_emb_batch_size")]
-        batch_size: usize,
-    },
+    pub data: PathBuf,
+    #[serde(default = "default_emb_batch_size")]
+    pub batch_size: usize,
 }
 
 fn default_emb_batch_size() -> usize {
@@ -239,10 +238,8 @@ embeddings:
   - name: wikidata_embeddings
     model: primary_model
     output: data/embeddings/wikidata
-    type: text
-    dataset: data/text/wikidata
-    params:
-      normalize: true
+    data: data/text/wikidata
+    batch_size: 64
 
 indices:
   - name: wikidata_keyword

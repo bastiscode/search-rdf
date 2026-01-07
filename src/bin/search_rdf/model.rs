@@ -1,6 +1,7 @@
 use anyhow::Result;
 use search_rdf::model::{
     EmbeddingModel,
+    image::huggingface::HuggingFaceImageModel,
     text::{sentence_transformer::SentenceTransformer, vllm::VLLM},
 };
 
@@ -23,6 +24,15 @@ pub fn load_model(model_type: &ModelType) -> Result<EmbeddingModel> {
         } => {
             let st = SentenceTransformer::load(model_name, device, *batch_size)?;
             Ok(EmbeddingModel::SentenceTransformer(st))
+        }
+
+        ModelType::HuggingFaceImage {
+            model_name,
+            device,
+            batch_size,
+        } => {
+            let img_model = HuggingFaceImageModel::load(model_name, device, *batch_size)?;
+            Ok(EmbeddingModel::HuggingFaceImage(img_model))
         }
     }
 }

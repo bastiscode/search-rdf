@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use axum::extract::{Json, Path as AxumPath, State};
 use axum::http::StatusCode;
 use futures::future::try_join_all;
 use search_rdf::data::embedding::Embedding;
+use search_rdf::data::item::load_image_ndarray_from_url;
 use search_rdf::model::EmbeddingParams;
 use serde::{Deserialize, Serialize};
 
@@ -31,9 +32,18 @@ pub struct SearchRequest {
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Query {
     Text(String),
-    #[allow(dead_code)]
     Url(String),
     Embedding(Embedding),
+}
+
+impl Query {
+    pub fn query_type(&self) -> &str {
+        match self {
+            Query::Text(_) => "text",
+            Query::Url(_) => "url",
+            Query::Embedding(_) => "embedding",
+        }
+    }
 }
 
 #[derive(Serialize, PartialEq, Eq)]
@@ -131,7 +141,21 @@ pub fn embed_query(
             .flatten()
             .next()
             .ok_or_else(|| anyhow!("Failed to embed query using VLLM model")),
-        (Query::Url(_), _) => Err(anyhow!("URL queries are not supported yet")),
+        (Query::Url(url), EmbeddingModel::HuggingFaceImage(m)) => {
+            let image =
+                load_image_ndarray_from_url(&url).context("Failed to load image from URL")?;
+            m.embed(&[&image], params)
+                .into_iter()
+                .flatten()
+                .next()
+                .ok_or_else(|| anyhow!("Failed to embed image query"))
+        }
+        (query, model) => Err(anyhow!(
+            "Cannot embed query of type {} with model {} of type {}",
+            query.query_type(),
+            model.model_name(),
+            model.model_type()
+        )),
     }
 }
 

@@ -92,7 +92,7 @@ impl Embed for HuggingFaceImageModel {
     }
 
     fn model_type(&self) -> &str {
-        "huggingface-image-encoder"
+        "huggingface-image"
     }
 }
 

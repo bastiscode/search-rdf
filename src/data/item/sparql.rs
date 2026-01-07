@@ -447,10 +447,11 @@ mod tests {
 </sparql>"#;
 
         let cursor = Cursor::new(sparql_xml);
-        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::XML, FieldType::Text)
-            .expect("Failed to create iterator")
-            .collect::<Result<Vec<_>>>()
-            .expect("Failed to parse SPARQL XML");
+        let items: Vec<_> =
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::XML, FieldType::Text)
+                .expect("Failed to create iterator")
+                .collect::<Result<Vec<_>>>()
+                .expect("Failed to parse SPARQL XML");
 
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
@@ -473,10 +474,11 @@ mod tests {
             <http://example.org/Q2>\t\"Earth\"";
 
         let cursor = Cursor::new(sparql_tsv);
-        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::TSV, FieldType::Text)
-            .expect("Failed to create iterator")
-            .collect::<Result<Vec<_>>>()
-            .expect("Failed to parse SPARQL TSV");
+        let items: Vec<_> =
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::TSV, FieldType::Text)
+                .expect("Failed to create iterator")
+                .collect::<Result<Vec<_>>>()
+                .expect("Failed to parse SPARQL TSV");
 
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
