@@ -678,7 +678,7 @@ impl Search for EmbeddingIndexWithData {
     }
 
     fn index_type(&self) -> &'static str {
-        "text-embedding"
+        "embedding-with-data"
     }
 
     fn search(&self, query: Self::Query<'_>, params: &Self::SearchParams) -> Result<Vec<Match>> {

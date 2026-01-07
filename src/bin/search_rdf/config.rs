@@ -23,7 +23,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "lowercase")]
 pub struct DataConfig {
     pub name: String,
     pub output: PathBuf,
@@ -31,7 +31,7 @@ pub struct DataConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum DataSource {
     #[serde(rename = "sparql-query")]
     SparqlQuery {
@@ -62,7 +62,7 @@ pub struct ModelConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum ModelType {
     Vllm {
         endpoint: String,
@@ -73,7 +73,7 @@ pub enum ModelType {
         model_name: String,
         #[serde(default = "default_device")]
         device: String,
-        #[serde(default = "default_st_batch_size")]
+        #[serde(default = "default_model_batch_size")]
         batch_size: usize,
     },
     #[serde(rename = "huggingface-image")]
@@ -81,7 +81,7 @@ pub enum ModelType {
         model_name: String,
         #[serde(default = "default_device")]
         device: String,
-        #[serde(default = "default_st_batch_size")]
+        #[serde(default = "default_model_batch_size")]
         batch_size: usize,
     },
 }
@@ -90,7 +90,7 @@ fn default_device() -> String {
     "cpu".to_string()
 }
 
-fn default_st_batch_size() -> usize {
+fn default_model_batch_size() -> usize {
     16
 }
 
@@ -117,7 +117,7 @@ pub struct IndexConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum IndexType {
     Keyword {
         data: PathBuf,

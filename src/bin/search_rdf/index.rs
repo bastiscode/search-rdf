@@ -22,7 +22,7 @@ pub enum SearchParams {
     Keyword(KeywordSearchParams),
     #[serde(rename = "full-text")]
     FullText(FullTextSearchParams),
-    #[serde(rename = "embedding")]
+    #[serde(rename = "embedding", alias = "embedding-with-data")]
     Embedding(EmbeddingSearchParams),
 }
 

@@ -193,16 +193,20 @@ pub async fn service(
                     })?;
 
                 match pred {
-                    "query" => {
-                        if let TermPattern::Literal(lit) = tp.object {
-                            query = Some(lit.value().to_string());
-                        } else {
+                    "query" => match tp.object {
+                        TermPattern::Literal(lit) => {
+                            query = Some(Query::Text(lit.value().to_string()));
+                        }
+                        TermPattern::NamedNode(iri) => {
+                            query = Some(Query::Url(iri.as_str().to_string()));
+                        }
+                        _ => {
                             return Err(AppError(
                                 StatusCode::BAD_REQUEST,
-                                anyhow!("Expected literal for 'query' predicate"),
+                                anyhow!("Expected literal or IRI for 'query' predicate"),
                             ));
                         }
-                    }
+                    },
                     name @ ("id" | "field" | "identifier" | "score" | "rank") => {
                         if let TermPattern::Variable(var) = tp.object {
                             variables.insert(name.to_string(), var);
@@ -260,9 +264,6 @@ pub async fn service(
             anyhow!("Failed to parse search parameters: {}", e),
         )
     })?;
-
-    // prepare query
-    let query = Query::Text(query);
 
     // perform search
     let matches = perform_search(index, vec![query], params, model).await?;
@@ -489,7 +490,11 @@ pub async fn qlproxy(
     let filter = move |id| id_to_row_clone.contains_key(&id);
 
     // Prepare query
-    let query = Query::Text(params.query);
+    let query = if NamedNode::new(&params.query).is_ok() {
+        Query::Url(params.query)
+    } else {
+        Query::Text(params.query)
+    };
 
     // Always perform filtered search
     let start = Instant::now();
