@@ -44,13 +44,23 @@ impl EmbeddingModel {
     }
 }
 
+pub trait AsInput<T: ?Sized> {
+    fn as_input(&self) -> &T;
+}
+
+impl<T: ?Sized, U: ?Sized + AsInput<T>> AsInput<T> for &U {
+    fn as_input(&self) -> &T {
+        (*self).as_input()
+    }
+}
+
 pub trait Embed {
     type Input: ?Sized;
     type Params;
 
     fn embed<I>(&self, inputs: &[I], params: &Self::Params) -> Result<Vec<Embedding>>
     where
-        I: AsRef<Self::Input>;
+        I: AsInput<Self::Input>;
 
     fn num_dimensions(&self) -> usize;
 

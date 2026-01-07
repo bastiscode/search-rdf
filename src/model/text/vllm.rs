@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::model::{Embed, EmbeddingParams};
+use crate::model::{AsInput, Embed, EmbeddingParams};
 use anyhow::{Result, anyhow};
 use log::info;
 use ureq::Agent;
@@ -68,7 +68,7 @@ fn fetch_max_model_len(agent: &Agent, model_name: &str, endpoint: &str) -> Resul
 fn embed(
     agent: &Agent,
     endpoint: &str,
-    inputs: &[impl AsRef<str>],
+    inputs: &[impl AsInput<str>],
     max_model_len: usize,
     params: &EmbeddingParams,
 ) -> Result<Vec<Vec<f32>>> {
@@ -81,7 +81,7 @@ fn embed(
         .post(format!("{endpoint}/v1/embeddings"))
         .header("Content-Type", "application/json")
         .send_json(serde_json::json!({
-            "input": inputs.iter().map(|s| s.as_ref()).collect::<Vec<_>>(),
+            "input": inputs.iter().map(|s| s.as_input()).collect::<Vec<_>>(),
             "truncate_prompt_tokens": max_model_len,
         }))?;
 
@@ -151,7 +151,7 @@ impl Embed for VLLM {
 
     fn embed<I>(&self, inputs: &[I], params: &Self::Params) -> Result<Vec<Vec<f32>>>
     where
-        I: AsRef<Self::Input>,
+        I: AsInput<Self::Input>,
     {
         embed(
             &self.inner.agent,

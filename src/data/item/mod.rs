@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use ndarray::Array3;
+use numpy::ndarray::Array3;
 use serde::{Deserialize, Serialize};
 use std::mem::size_of;
 
@@ -285,6 +285,7 @@ impl<'a> Iterator for FieldIter<'a> {
 impl<'a> ExactSizeIterator for FieldIter<'a> {}
 
 fn load_bytes_from_url(url: &str) -> Result<Vec<u8>> {
+    use std::io::Read;
     use url::Url;
 
     let parsed = Url::parse(url);
@@ -292,8 +293,10 @@ fn load_bytes_from_url(url: &str) -> Result<Vec<u8>> {
     match parsed {
         Ok(url_parsed) => match url_parsed.scheme() {
             "http" | "https" => {
-                let response = reqwest::blocking::get(url)?;
-                Ok(response.bytes()?.to_vec())
+                let response = ureq::get(url).call()?;
+                let mut bytes = Vec::new();
+                response.into_body().into_reader().read_to_end(&mut bytes)?;
+                Ok(bytes)
             }
             "file" => {
                 let path = url_parsed
@@ -386,7 +389,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn test_encode_decode_text() {
         let item = Item::from_string_fields(
@@ -415,7 +417,6 @@ mod tests {
         assert_eq!(fields[1].as_str(), "Hitchhiker's Guide");
         assert!(fields[0].is_text());
     }
-
 
     #[test]
     fn test_item_ref_field_access() {
@@ -513,8 +514,8 @@ mod tests {
 
     #[test]
     fn test_empty_fields() {
-        let item = Item::from_string_fields("Q1".to_string(), vec![])
-            .expect("Failed to create item");
+        let item =
+            Item::from_string_fields("Q1".to_string(), vec![]).expect("Failed to create item");
 
         let encoded = item.encode();
         let item_ref = ItemRef::decode(&encoded).expect("Failed to decode");

@@ -8,7 +8,7 @@ use pyo3::{
 
 use crate::{
     data::embedding::Embedding,
-    model::{Embed, EmbeddingParams},
+    model::{AsInput, Embed, EmbeddingParams},
 };
 
 #[derive(Debug)]
@@ -56,11 +56,11 @@ impl Embed for SentenceTransformer {
 
     fn embed<I>(&self, inputs: &[I], params: &Self::Params) -> Result<Vec<Embedding>>
     where
-        I: AsRef<Self::Input>,
+        I: AsInput<Self::Input>,
     {
         Python::attach(|py| {
             let model = self.inner.model.bind(py);
-            let inputs = PyList::new(py, inputs.iter().map(|s| s.as_ref()))?;
+            let inputs = PyList::new(py, inputs.iter().map(|s| s.as_input()))?;
             let kwargs = PyDict::new(py);
             kwargs.set_item("batch_size", self.inner.batch_size)?;
             kwargs.set_item("embedding_dim", params.num_dimensions)?;
