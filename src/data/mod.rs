@@ -117,6 +117,12 @@ impl Data {
         let identifier_map_file = data_dir.join("identifier-map.bin");
         identifier_map.save(&identifier_map_file)?;
 
+        info!(
+            "Built data with {} items and {} total fields",
+            data_map.len(),
+            total_fields
+        );
+
         Ok(())
     }
 

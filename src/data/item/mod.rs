@@ -1,7 +1,17 @@
 use anyhow::{Result, anyhow};
+use http::{
+    Response, StatusCode,
+    header::{RETRY_AFTER, USER_AGENT},
+};
+use log::warn;
 use numpy::ndarray::Array3;
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::mem::size_of;
+use std::thread::sleep;
+use std::time::Duration;
+use ureq::{Agent, Body, config::Config};
+use url::Url;
 
 pub mod jsonl;
 pub mod sparql;
@@ -285,19 +295,11 @@ impl<'a> Iterator for FieldIter<'a> {
 impl<'a> ExactSizeIterator for FieldIter<'a> {}
 
 fn load_bytes_from_url(url: &str) -> Result<Vec<u8>> {
-    use std::io::Read;
-    use url::Url;
-
     let parsed = Url::parse(url);
 
     match parsed {
         Ok(url_parsed) => match url_parsed.scheme() {
-            "http" | "https" => {
-                let response = ureq::get(url).call()?;
-                let mut bytes = Vec::new();
-                response.into_body().into_reader().read_to_end(&mut bytes)?;
-                Ok(bytes)
-            }
+            "http" | "https" => fetch_http_with_retry(url),
             "file" => {
                 let path = url_parsed
                     .to_file_path()
@@ -308,6 +310,90 @@ fn load_bytes_from_url(url: &str) -> Result<Vec<u8>> {
         },
         Err(_) => Ok(std::fs::read(url)?),
     }
+}
+
+fn error_from_response(mut response: Response<Body>) -> anyhow::Error {
+    anyhow!(
+        "HTTP {}: {}",
+        response.status(),
+        response
+            .body_mut()
+            .read_to_string()
+            .unwrap_or_else(|e| format!("Failed to read response body: {}", e))
+    )
+}
+
+fn fetch_http_with_retry(url: &str) -> Result<Vec<u8>> {
+    const MAX_TRIES: u32 = 5;
+    const INITIAL_BACKOFF_MS: u64 = 1000;
+
+    let config = Config::builder().http_status_as_error(false).build();
+    let agent = Agent::new_with_config(config);
+
+    let mut attempt = 0;
+    loop {
+        match agent
+            .get(url)
+            .header(USER_AGENT, "search-rdf-http-client")
+            .call()
+        {
+            Ok(response) if should_retry(response.status()) => {
+                if attempt >= MAX_TRIES {
+                    warn!(
+                        "Request to {} failed with status {}. Max retries reached.",
+                        url,
+                        response.status(),
+                    );
+                    return Err(error_from_response(response));
+                }
+                let backoff_ms = parse_retry_after(&response)
+                    .unwrap_or_else(|| INITIAL_BACKOFF_MS * 2u64.pow(attempt));
+
+                warn!(
+                    "Request to {} failed with status {} during attempt {}/{}. Retrying after {:.2}s...",
+                    url,
+                    response.status(),
+                    attempt + 1,
+                    MAX_TRIES,
+                    Duration::from_millis(backoff_ms).as_secs_f64(),
+                );
+                sleep(Duration::from_millis(backoff_ms));
+                attempt += 1;
+            }
+            Ok(response) if response.status().is_success() => {
+                let mut bytes = Vec::new();
+                response.into_body().into_reader().read_to_end(&mut bytes)?;
+                return Ok(bytes);
+            }
+            Ok(response) => {
+                warn!(
+                    "Request to {} failed with unexpected status {}. Not retrying.",
+                    url,
+                    response.status()
+                );
+                return Err(error_from_response(response));
+            }
+            Err(e) => {
+                return Err(anyhow!("Unexpected error fetching {}: {}", url, e));
+            }
+        }
+    }
+}
+
+fn should_retry(status: StatusCode) -> bool {
+    status.is_server_error() || status == 429
+}
+
+fn parse_retry_after(response: &Response<Body>) -> Option<u64> {
+    response.headers().get(RETRY_AFTER).and_then(|value| {
+        // The Retry-After header can be either a number of seconds or an HTTP date
+        // We'll only handle the seconds format for simplicity
+        value
+            .to_str()
+            .ok()
+            .and_then(|str| str.parse::<u64>().ok())
+            .map(|seconds| seconds * 1000)
+    })
 }
 
 pub fn load_image_ndarray_from_bytes(bytes: &[u8]) -> Result<Array3<u8>> {

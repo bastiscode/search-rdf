@@ -27,8 +27,7 @@ pub struct Config {
 pub struct DataConfig {
     pub name: String,
     pub output: PathBuf,
-    #[serde(flatten)]
-    pub data_source: DataSource,
+    pub source: DataSource,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -215,18 +214,19 @@ server:
 datasets:
   - name: test-dataset
     output: data/text/test
-    type: sparql-query
-    endpoint: https://query.wikidata.org/sparql
-    query: |
-      SELECT ?item ?label
-      WHERE {
-        ?item wdt:P31 wd:Q5 .
-        ?item rdfs:label ?label .
-        FILTER(LANG(?label) = "en")
-      }
-      LIMIT 1000
-    format: json
-    default_field_type: text
+    source:
+      type: sparql-query
+      endpoint: https://query.wikidata.org/sparql
+      query: |
+        SELECT ?item ?label
+        WHERE {
+            ?item wdt:P31 wd:Q5 .
+            ?item rdfs:label ?label .
+            FILTER(LANG(?label) = "en")
+        }
+        LIMIT 1000
+      format: json
+      default_field_type: text
 
 models:
   - name: primary_model
@@ -271,7 +271,7 @@ server:
         let dataset = &config.datasets.as_ref().unwrap()[0];
         assert_eq!(dataset.name, "test-dataset");
         assert_eq!(dataset.output, PathBuf::from("data/text/test"));
-        match &dataset.data_source {
+        match &dataset.source {
             DataSource::SparqlQuery {
                 endpoint,
                 query,

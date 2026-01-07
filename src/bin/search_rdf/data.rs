@@ -38,7 +38,7 @@ pub fn run(config_path: &Path, force: bool) -> Result<()> {
         }
 
         info!("[BUILD] {}...", dataset.name);
-        build_data(config_dir, &dataset.data_source, &dataset.output)?;
+        build_data(config_dir, &dataset.source, &dataset.output)?;
         info!("[OK] {} -> {}", dataset.name, dataset.output.display());
     }
 
@@ -49,7 +49,7 @@ fn build_data(base_dir: &Path, source: &DataSource, output: &Path) -> Result<()>
     // Get iterator of Items based on source type
     let items: Box<dyn Iterator<Item = Result<Item>>> = match source {
         DataSource::Jsonl { path } => {
-            info!("Streaming text data from JSONL file: {}", path.display());
+            info!("Streaming data from JSONL file: {}", path.display());
             Box::new(stream_items_from_jsonl_file(path)?)
         }
         DataSource::Sparql {
@@ -57,10 +57,7 @@ fn build_data(base_dir: &Path, source: &DataSource, output: &Path) -> Result<()>
             format,
             default_field_type,
         } => {
-            info!(
-                "Streaming text data from SPARQL result file: {}",
-                path.display()
-            );
+            info!("Streaming data from SPARQL result file: {}", path.display());
             Box::new(stream_items_from_sparql_result_file(
                 path,
                 *format,
@@ -95,7 +92,7 @@ fn build_data(base_dir: &Path, source: &DataSource, output: &Path) -> Result<()>
         }
     };
 
-    info!("Building text dataset...");
+    info!("Building dataset...");
 
     // Build TextData
     Data::build(items, &base_dir.join(output))?;

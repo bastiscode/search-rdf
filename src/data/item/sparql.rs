@@ -100,19 +100,15 @@ fn parse_solution(
 
     let identifier = node.as_str().to_string();
 
-    let Term::Literal(literal) = second else {
-        return Err(anyhow!(
-            "Expected second variable to be a literal, found {:?}",
-            second
-        ));
-    };
-
-    let value = match literal.datatype() {
-        xsd::STRING | rdf::LANG_STRING => literal.value().to_string(),
+    let value = match second {
+        Term::Literal(literal) if [xsd::STRING, rdf::LANG_STRING].contains(&literal.datatype()) => {
+            literal.value().to_string()
+        }
+        Term::NamedNode(iri) => iri.as_str().to_string(),
         _ => {
             return Err(anyhow!(
-                "Expected second variable to be a string literal, found datatype {:?}",
-                literal.datatype()
+                "Expected second variable to be a string literal or IRI, found {:?}",
+                second
             ));
         }
     };
@@ -120,7 +116,7 @@ fn parse_solution(
     let field_type = if let Some(Some(third)) = values.get(2) {
         let Term::Literal(type_literal) = third else {
             return Err(anyhow!(
-                "Expected third variable (type) to be a literal, found {:?}",
+                "Expected third variable (type) to be a string literal, found {:?}",
                 third
             ));
         };

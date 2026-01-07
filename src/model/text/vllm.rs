@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::model::{AsInput, Embed, EmbeddingParams};
 use anyhow::{Result, anyhow};
+use http::header::{CONTENT_TYPE, USER_AGENT};
 use log::info;
 use ureq::Agent;
 
@@ -79,7 +80,8 @@ fn embed(
     // This is a placeholder implementation
     let response = agent
         .post(format!("{endpoint}/v1/embeddings"))
-        .header("Content-Type", "application/json")
+        .header(USER_AGENT, "search-rdf-vllm-client")
+        .header(CONTENT_TYPE, "application/json")
         .send_json(serde_json::json!({
             "input": inputs.iter().map(|s| s.as_input()).collect::<Vec<_>>(),
             "truncate_prompt_tokens": max_model_len,
@@ -98,7 +100,7 @@ fn embed(
 
 impl VLLM {
     pub fn new(endpoint: &str, model_name: &str) -> Result<Self> {
-        let agent = Agent::new_with_defaults();
+        let agent = ureq::agent();
         info!(
             "[vLLM] Initializing model '{}' with endpoint '{}'",
             model_name, endpoint
