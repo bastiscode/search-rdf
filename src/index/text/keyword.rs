@@ -682,12 +682,11 @@ impl Search for KeywordIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::item::Item as DataItem;
-    use crate::data::text::TextData;
+    use crate::data::{Data, item::{FieldType, Item as DataItem, StringField}};
     use std::fs::create_dir_all;
     use tempfile::tempdir;
 
-    fn build_keyword_index(data: TextData, index_dir: &Path) -> KeywordIndex {
+    fn build_keyword_index(data: Data, index_dir: &Path) -> KeywordIndex {
         create_dir_all(index_dir).expect("Failed to create index directory");
         KeywordIndex::build(&data, index_dir, &()).expect("Failed to build index");
         KeywordIndex::load(data, index_dir).expect("Failed to load index")
@@ -701,16 +700,26 @@ mod tests {
 
         // Create test data: id -> labels
         let items = vec![
-            Ok(DataItem::new("0".to_string(), vec!["agar".to_string()])
-                .expect("Failed to create Item")),
-            Ok(
-                DataItem::new("1".to_string(), vec!["agar agar".to_string()])
-                    .expect("Failed to create Item"),
-            ),
+            Ok(DataItem::from_string_fields(
+                "0".to_string(),
+                vec![StringField {
+                    field_type: FieldType::Text,
+                    value: "agar".to_string(),
+                }],
+            )
+            .expect("Failed to create Item")),
+            Ok(DataItem::from_string_fields(
+                "1".to_string(),
+                vec![StringField {
+                    field_type: FieldType::Text,
+                    value: "agar agar".to_string(),
+                }],
+            )
+            .expect("Failed to create Item")),
         ];
 
-        TextData::build(items, &data_dir).expect("Failed to build data");
-        let data = TextData::load(&data_dir).expect("Failed to load data");
+        Data::build(items, &data_dir).expect("Failed to build data");
+        let data = Data::load(&data_dir).expect("Failed to load data");
 
         let index = build_keyword_index(data, &index_dir);
 
@@ -750,14 +759,23 @@ mod tests {
         let index_dir = temp_dir.path().join("index");
 
         // Create simple test data
-        let items = vec![Ok(DataItem::new(
+        let items = vec![Ok(DataItem::from_string_fields(
             "Q30".to_string(),
-            vec!["United States".to_string(), "the U.S. of A".to_string()],
+            vec![
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "United States".to_string(),
+                },
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "the U.S. of A".to_string(),
+                },
+            ],
         )
         .expect("Failed to create Item"))];
 
-        TextData::build(items, &data_dir).expect("Failed to build data");
-        let data = TextData::load(&data_dir).expect("Failed to load data");
+        Data::build(items, &data_dir).expect("Failed to build data");
+        let data = Data::load(&data_dir).expect("Failed to load data");
 
         let index = build_keyword_index(data, &index_dir);
 
@@ -802,7 +820,7 @@ mod tests {
             .expect("Failed to find matches");
 
         assert!(matches!(matches[0], Match::WithField(0, 1, score) if (score - 4.0).abs() < 1e-6));
-        assert_eq!(index.data().field(0, 1).unwrap(), "the U.S. of A");
+        assert_eq!(index.data().field(0, 1).unwrap().as_str(), "the U.S. of A");
 
         // Test no match
         let matches = index
@@ -905,28 +923,46 @@ mod tests {
         // Entity 0: ["common label", "specific alpha", "specific beta"]
         // Entity 1: ["common label", "specific gamma", "specific delta"]
         let items = vec![
-            Ok(DataItem::new(
+            Ok(DataItem::from_string_fields(
                 "Entity0".to_string(),
                 vec![
-                    "common label".to_string(),
-                    "specific alpha".to_string(),
-                    "specific beta".to_string(),
+                    StringField {
+                        field_type: FieldType::Text,
+                        value: "common label".to_string(),
+                    },
+                    StringField {
+                        field_type: FieldType::Text,
+                        value: "specific alpha".to_string(),
+                    },
+                    StringField {
+                        field_type: FieldType::Text,
+                        value: "specific beta".to_string(),
+                    },
                 ],
             )
             .expect("Failed to create Item")),
-            Ok(DataItem::new(
+            Ok(DataItem::from_string_fields(
                 "Entity1".to_string(),
                 vec![
-                    "common label".to_string(),
-                    "specific gamma".to_string(),
-                    "specific delta".to_string(),
+                    StringField {
+                        field_type: FieldType::Text,
+                        value: "common label".to_string(),
+                    },
+                    StringField {
+                        field_type: FieldType::Text,
+                        value: "specific gamma".to_string(),
+                    },
+                    StringField {
+                        field_type: FieldType::Text,
+                        value: "specific delta".to_string(),
+                    },
                 ],
             )
             .expect("Failed to create Item")),
         ];
 
-        TextData::build(items, &data_dir).expect("Failed to build data");
-        let data = TextData::load(&data_dir).expect("Failed to load data");
+        Data::build(items, &data_dir).expect("Failed to build data");
+        let data = Data::load(&data_dir).expect("Failed to load data");
         let index = build_keyword_index(data, &index_dir);
 
         // Test 1: Query "specific alpha" should match Entity0, field 1
@@ -952,7 +988,7 @@ mod tests {
                 .data()
                 .field(id, field_idx)
                 .expect("Field should exist");
-            assert_eq!(field_text, "specific alpha");
+            assert_eq!(field_text.as_str(), "specific alpha");
         } else {
             panic!("Expected Match::WithField");
         }
@@ -979,7 +1015,7 @@ mod tests {
                 .data()
                 .field(id, field_idx)
                 .expect("Field should exist");
-            assert_eq!(field_text, "specific beta");
+            assert_eq!(field_text.as_str(), "specific beta");
         } else {
             panic!("Expected Match::WithField");
         }
@@ -1006,7 +1042,7 @@ mod tests {
                 .data()
                 .field(id, field_idx)
                 .expect("Field should exist");
-            assert_eq!(field_text, "specific gamma");
+            assert_eq!(field_text.as_str(), "specific gamma");
         } else {
             panic!("Expected Match::WithField");
         }
@@ -1033,7 +1069,7 @@ mod tests {
                 .data()
                 .field(id, field_idx)
                 .expect("Field should exist");
-            assert_eq!(field_text, "specific delta");
+            assert_eq!(field_text.as_str(), "specific delta");
         } else {
             panic!("Expected Match::WithField");
         }
@@ -1060,7 +1096,7 @@ mod tests {
                     .data()
                     .field(id, field_idx)
                     .expect("Field should exist");
-                assert_eq!(field_text, "common label");
+                assert_eq!(field_text.as_str(), "common label");
             } else {
                 panic!("Expected Match::WithField");
             }

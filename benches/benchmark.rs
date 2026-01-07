@@ -9,13 +9,13 @@ use criterion::{Criterion, criterion_group, criterion_main};
 
 use search_rdf::{
     data::{
-        DataSource, TextData,
+        Data, DataSource,
+        item::{FieldType, Item, StringField},
         map::{OrderedDataMap, TrieMap},
-        text::item::Item,
     },
     index::{
         Search,
-        keyword::{KeywordIndex, KeywordSearchParams},
+        text::keyword::{KeywordIndex, KeywordSearchParams},
     },
 };
 
@@ -29,8 +29,13 @@ fn read_tsv_items(tsv_file: &Path) -> Result<Vec<Item>> {
         let mut parts = line.split('\t');
 
         if let Some(identifier) = parts.next() {
-            let fields: Vec<String> = parts.map(|s| s.to_string()).collect();
-            let item = Item::new(identifier.to_string(), fields)?;
+            let fields: Vec<_> = parts
+                .map(|s| StringField {
+                    field_type: FieldType::Text,
+                    value: s.to_string(),
+                })
+                .collect();
+            let item = Item::from_string_fields(identifier.to_string(), fields)?;
             items.push(item);
         }
     }
@@ -46,21 +51,20 @@ fn bench_data(c: &mut Criterion) {
 
     // Read TSV items and build data
     let items = read_tsv_items(&tsv_file).expect("Failed to read TSV items");
-    TextData::build(items.iter().cloned().map(Ok), &data_dir).expect("Failed to build data");
-    let data = TextData::load(&data_dir).expect("Failed to load data");
+    Data::build(items.iter().cloned().map(Ok), &data_dir).expect("Failed to build data");
+    let data = Data::load(&data_dir).expect("Failed to load data");
 
     let mut g = c.benchmark_group("data");
 
     g.bench_function("build_data", |b| {
         b.iter(|| {
-            TextData::build(items.iter().cloned().map(Ok), &data_dir)
-                .expect("Failed to build data");
+            Data::build(items.iter().cloned().map(Ok), &data_dir).expect("Failed to build data");
         })
     });
 
     g.bench_function("load_data", |b| {
         b.iter(|| {
-            let _ = TextData::load(&data_dir).expect("Failed to load data");
+            let _ = Data::load(&data_dir).expect("Failed to load data");
         })
     });
 
@@ -130,8 +134,8 @@ fn bench_keyword_index(c: &mut Criterion) {
     );
 
     let items = read_tsv_items(&tsv_file).expect("Failed to read TSV items");
-    TextData::build(items.into_iter().map(Ok), &data_dir).expect("Failed to build data");
-    let data = TextData::load(&data_dir).expect("Failed to load data");
+    Data::build(items.into_iter().map(Ok), &data_dir).expect("Failed to build data");
+    let data = Data::load(&data_dir).expect("Failed to load data");
 
     KeywordIndex::build(&data, &index_dir, &()).expect("Failed to build index");
 

@@ -41,6 +41,7 @@ pub fn stream_items_from_jsonl_file(
 
 #[test]
 fn test_stream_items_from_jsonl() {
+    use crate::data::item::Field;
     use std::io::Cursor;
 
     let jsonl_data = r#"{"identifier":"Q1","fields":[{"type":"text","value":"Universe"},{"type":"text","value":"Cosmos"}]}
@@ -56,22 +57,22 @@ fn test_stream_items_from_jsonl() {
     assert_eq!(items.len(), 3);
     assert_eq!(items[0].identifier, "Q1");
     assert_eq!(items[0].num_fields(), 2);
-    assert_eq!(items[0].fields[0].as_str(), "Universe");
-    assert_eq!(items[0].fields[1].as_str(), "Cosmos");
-    assert!(items[0].fields[0].is_text());
+    assert_eq!(items[0].fields[0], Field::Text("Universe".to_string()));
+    assert_eq!(items[0].fields[1], Field::Text("Cosmos".to_string()));
 
     assert_eq!(items[1].identifier, "Q2");
     assert_eq!(items[1].num_fields(), 2);
-    assert_eq!(items[1].fields[0].as_str(), "Earth");
-    assert_eq!(items[1].fields[1].as_str(), "World");
+    assert_eq!(items[1].fields[0], Field::Text("Earth".to_string()));
+    assert_eq!(items[1].fields[1], Field::Text("World".to_string()));
 
     assert_eq!(items[2].identifier, "Q3");
     assert_eq!(items[2].num_fields(), 1);
-    assert_eq!(items[2].fields[0].as_str(), "Human");
+    assert_eq!(items[2].fields[0], Field::Text("Human".to_string()));
 }
 
 #[test]
 fn test_stream_items_from_jsonl_file() {
+    use crate::data::item::Field;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -95,12 +96,12 @@ fn test_stream_items_from_jsonl_file() {
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].identifier, "Q42");
     assert_eq!(items[0].num_fields(), 2);
-    assert_eq!(items[0].fields[0].as_str(), "Douglas Adams");
-    assert_eq!(items[0].fields[1].as_str(), "Author");
+    assert_eq!(items[0].fields[0], Field::Text("Douglas Adams".to_string()));
+    assert_eq!(items[0].fields[1], Field::Text("Author".to_string()));
 
     assert_eq!(items[1].identifier, "Q100");
     assert_eq!(items[1].num_fields(), 3);
-    assert_eq!(items[1].fields[0].as_str(), "Test");
-    assert_eq!(items[1].fields[1].as_str(), "Example");
-    assert_eq!(items[1].fields[2].as_str(), "Demo");
+    assert_eq!(items[1].fields[0], Field::Text("Test".to_string()));
+    assert_eq!(items[1].fields[1], Field::Text("Example".to_string()));
+    assert_eq!(items[1].fields[2], Field::Text("Demo".to_string()));
 }

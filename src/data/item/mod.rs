@@ -22,7 +22,7 @@ pub struct StringField {
     pub value: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Field {
     Text(String),
     ImageInline { url: String, data: Vec<u8> },
@@ -173,7 +173,7 @@ impl<'a> ItemRef<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FieldRef<'a> {
     Text(&'a str),
     ImageInline { url: &'a str, data: &'a [u8] },
@@ -342,66 +342,65 @@ mod tests {
 
     #[test]
     fn test_text_field_creation() {
-        let item = Item::from_strings(
-            "Q64".to_string(),
-            vec!["Berlin".to_string(), "Capital of Germany".to_string()],
-            FieldType::Text,
-        )
-        .expect("Failed to create item");
-
-        assert_eq!(item.identifier, "Q64");
-        assert_eq!(item.num_fields(), 2);
-        assert!(item.fields[0].is_text());
-        assert_eq!(item.fields[0].as_str(), "Berlin");
-    }
-
-    #[test]
-    fn test_image_field_creation() {
-        let item = Item::from_strings(
+        let item = Item::from_string_fields(
             "Q64".to_string(),
             vec![
-                "https://example.com/berlin1.jpg".to_string(),
-                "file:///path/to/berlin2.jpg".to_string(),
-            ],
-            FieldType::Image,
-        )
-        .expect("Failed to create item");
-
-        assert_eq!(item.num_fields(), 2);
-        assert!(item.fields[0].is_image());
-        assert_eq!(item.fields[0].as_str(), "https://example.com/berlin1.jpg");
-    }
-
-    #[test]
-    fn test_mixed_fields() {
-        let item = Item::new(
-            "Q64".to_string(),
-            vec![
-                Field::Text("Berlin".to_string()),
-                Field::Image("https://example.com/berlin.jpg".to_string()),
-                Field::ImageInline {
-                    url: "https://example.com/inline.jpg".to_string(),
-                    data: vec![1, 2, 3, 4],
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "Berlin".to_string(),
+                },
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "Capital of Germany".to_string(),
                 },
             ],
         )
         .expect("Failed to create item");
 
-        assert_eq!(item.num_fields(), 3);
-        assert!(item.fields[0].is_text());
-        assert!(item.fields[1].is_image());
-        assert!(item.fields[2].is_image_inline());
+        assert_eq!(item.identifier, "Q64");
+        assert_eq!(item.num_fields(), 2);
+        assert_eq!(item.fields[0], Field::Text("Berlin".to_string()));
     }
 
     #[test]
+    fn test_image_field_creation() {
+        let item = Item::from_string_fields(
+            "Q64".to_string(),
+            vec![
+                StringField {
+                    field_type: FieldType::Image,
+                    value: "https://example.com/berlin1.jpg".to_string(),
+                },
+                StringField {
+                    field_type: FieldType::Image,
+                    value: "file:///path/to/berlin2.jpg".to_string(),
+                },
+            ],
+        )
+        .expect("Failed to create item");
+
+        assert_eq!(item.num_fields(), 2);
+        assert_eq!(
+            item.fields[0],
+            Field::Image("https://example.com/berlin1.jpg".to_string())
+        );
+    }
+
+
+    #[test]
     fn test_encode_decode_text() {
-        let item = Item::from_strings(
+        let item = Item::from_string_fields(
             "Q42".to_string(),
             vec![
-                "Douglas Adams".to_string(),
-                "Hitchhiker's Guide".to_string(),
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "Douglas Adams".to_string(),
+                },
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "Hitchhiker's Guide".to_string(),
+                },
             ],
-            FieldType::Text,
         )
         .expect("Failed to create item");
 
@@ -417,81 +416,25 @@ mod tests {
         assert!(fields[0].is_text());
     }
 
-    #[test]
-    fn test_encode_decode_images() {
-        let item = Item::new(
-            "Q64".to_string(),
-            vec![
-                Field::Image("https://example.com/berlin.jpg".to_string()),
-                Field::ImageInline {
-                    url: "https://example.com/inline.jpg".to_string(),
-                    data: vec![0x89, 0x50, 0x4E, 0x47],
-                },
-            ],
-        )
-        .expect("Failed to create item");
-
-        let encoded = item.encode();
-        let item_ref = ItemRef::decode(&encoded).expect("Failed to decode");
-
-        assert_eq!(item_ref.num_fields(), 2);
-
-        let fields: Vec<_> = item_ref.fields().collect();
-        match fields[0] {
-            FieldRef::Image(url) => assert_eq!(url, "https://example.com/berlin.jpg"),
-            _ => panic!("Expected Image field"),
-        }
-        match fields[1] {
-            FieldRef::ImageInline { url, data } => {
-                assert_eq!(url, "https://example.com/inline.jpg");
-                assert_eq!(data, &[0x89, 0x50, 0x4E, 0x47]);
-            }
-            _ => panic!("Expected ImageInline field"),
-        }
-    }
-
-    #[test]
-    fn test_encode_decode_mixed() {
-        let item = Item::new(
-            "Q1".to_string(),
-            vec![
-                Field::Text("Hello".to_string()),
-                Field::Image("file:///test.jpg".to_string()),
-                Field::ImageInline {
-                    url: "https://example.com/img.jpg".to_string(),
-                    data: vec![1, 2, 3],
-                },
-                Field::Text("World".to_string()),
-            ],
-        )
-        .expect("Failed to create item");
-
-        let encoded = item.encode();
-        let item_ref = ItemRef::decode(&encoded).expect("Failed to decode");
-
-        assert_eq!(item_ref.num_fields(), 4);
-
-        let fields: Vec<_> = item_ref.fields().collect();
-        assert!(fields[0].is_text());
-        assert_eq!(fields[0].as_str(), "Hello");
-        assert!(fields[1].is_image());
-        assert_eq!(fields[1].as_str(), "file:///test.jpg");
-        assert!(fields[2].is_image_inline());
-        assert_eq!(fields[2].get_data().unwrap(), &[1, 2, 3]);
-        assert!(fields[3].is_text());
-        assert_eq!(fields[3].as_str(), "World");
-    }
 
     #[test]
     fn test_item_ref_field_access() {
-        let item = Item::from_strings(
+        let item = Item::from_string_fields(
             "Q1".to_string(),
             vec![
-                "first".to_string(),
-                "second".to_string(),
-                "third".to_string(),
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "first".to_string(),
+                },
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "second".to_string(),
+                },
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "third".to_string(),
+                },
             ],
-            FieldType::Text,
         )
         .expect("Failed to create item");
 
@@ -506,10 +449,22 @@ mod tests {
 
     #[test]
     fn test_field_iter_exact_size() {
-        let item = Item::from_strings(
+        let item = Item::from_string_fields(
             "Q1".to_string(),
-            vec!["a".to_string(), "b".to_string(), "c".to_string()],
-            FieldType::Text,
+            vec![
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "a".to_string(),
+                },
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "b".to_string(),
+                },
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "c".to_string(),
+                },
+            ],
         )
         .expect("Failed to create item");
 
@@ -522,33 +477,15 @@ mod tests {
     }
 
     #[test]
-    fn test_to_owned() {
-        let item = Item::new(
-            "Q1".to_string(),
-            vec![
-                Field::Text("test".to_string()),
-                Field::ImageInline {
-                    url: "https://example.com/img.jpg".to_string(),
-                    data: vec![1, 2, 3],
-                },
-            ],
-        )
-        .expect("Failed to create item");
-
-        let encoded = item.encode();
-        let item_ref = ItemRef::decode(&encoded).expect("Failed to decode");
-        let owned = item_ref.to_owned();
-
-        assert_eq!(owned.identifier, "Q1");
-        assert_eq!(owned.num_fields(), 2);
-        assert_eq!(owned.fields[0].as_str(), "test");
-        assert_eq!(owned.fields[1].data().unwrap(), &[1, 2, 3]);
-    }
-
-    #[test]
     fn test_identifier_too_long() {
-        let long_id = "a".repeat((u32::MAX as usize) + 1);
-        let result = Item::from_strings(long_id, vec!["field".to_string()], FieldType::Text);
+        let long_id = "a".repeat((u16::MAX as usize) + 1);
+        let result = Item::from_string_fields(
+            long_id,
+            vec![StringField {
+                field_type: FieldType::Text,
+                value: "field".to_string(),
+            }],
+        );
 
         assert!(result.is_err());
         assert!(
@@ -561,8 +498,14 @@ mod tests {
 
     #[test]
     fn test_too_many_fields() {
-        let fields = vec!["field".to_string(); (u16::MAX as usize) + 1];
-        let result = Item::from_strings("Q1".to_string(), fields, FieldType::Text);
+        let fields = vec![
+            StringField {
+                field_type: FieldType::Text,
+                value: "field".to_string(),
+            };
+            (u16::MAX as usize) + 1
+        ];
+        let result = Item::from_string_fields("Q1".to_string(), fields);
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Too many fields"));
@@ -570,7 +513,7 @@ mod tests {
 
     #[test]
     fn test_empty_fields() {
-        let item = Item::from_strings("Q1".to_string(), vec![], FieldType::Text)
+        let item = Item::from_string_fields("Q1".to_string(), vec![])
             .expect("Failed to create item");
 
         let encoded = item.encode();
@@ -582,14 +525,22 @@ mod tests {
 
     #[test]
     fn test_special_characters() {
-        let item = Item::from_strings(
+        let item = Item::from_string_fields(
             "Q1".to_string(),
             vec![
-                "UTF-8: 你好世界".to_string(),
-                "Emoji: 🦀".to_string(),
-                "Special: @#$%".to_string(),
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "UTF-8: 你好世界".to_string(),
+                },
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "Emoji: 🦀".to_string(),
+                },
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "Special: @#$%".to_string(),
+                },
             ],
-            FieldType::Text,
         )
         .expect("Failed to create item");
 

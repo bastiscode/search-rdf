@@ -1002,7 +1002,7 @@ mod embedding_index_tests {
             assert_eq!(id, 100, "Expected ID 100 for Hamming Binary");
             // Hamming score should be in [0, 1] where 1 is identical
             assert!(
-                score >= 0.0 && score <= 1.0,
+                (0.0..1.0).contains(&score),
                 "Hamming score out of range: {}",
                 score
             );

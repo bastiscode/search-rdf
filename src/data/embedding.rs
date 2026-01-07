@@ -481,7 +481,7 @@ mod tests {
         use safetensors::tensor::{Dtype, TensorView};
 
         let embeddings = vec![vec![1.0, 2.0]];
-        let ids = vec![1u32];
+        let ids = [1u32];
 
         let embedding_data: Vec<f32> = embeddings.into_iter().flatten().collect();
         let embedding_bytes: Vec<u8> = embedding_data
@@ -528,7 +528,7 @@ mod tests {
         use safetensors::tensor::{Dtype, TensorView};
 
         let embeddings = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
-        let ids = vec![1u32, 2, 3]; // Wrong length!
+        let ids = [1u32, 2, 3]; // Wrong length!
 
         let embedding_data: Vec<f32> = embeddings.into_iter().flatten().collect();
         let embedding_bytes: Vec<u8> = embedding_data

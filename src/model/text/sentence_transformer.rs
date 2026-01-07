@@ -102,7 +102,7 @@ mod tests {
     fn test_embedding_params_default() {
         let params = EmbeddingParams::default();
         assert_eq!(params.num_dimensions, None);
-        assert_eq!(params.normalize, true);
+        assert!(params.normalize);
     }
 
     #[test]

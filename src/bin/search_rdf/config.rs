@@ -128,7 +128,7 @@ pub enum IndexType {
     FullText {
         data: PathBuf,
     },
-    #[serde(rename = "text-embedding")]
+    #[serde(rename = "embedding-with-data")]
     EmbeddingWithData {
         data: PathBuf,
         embedding_data: PathBuf,
@@ -216,19 +216,18 @@ server:
 datasets:
   - name: test-dataset
     output: data/text/test
-    type: text
-    source:
-      type: sparql-query
-      endpoint: https://query.wikidata.org/sparql
-      query: |
-        SELECT ?item ?label
-        WHERE {
-          ?item wdt:P31 wd:Q5 .
-          ?item rdfs:label ?label .
-          FILTER(LANG(?label) = "en")
-        }
-        LIMIT 1000
-      format: json
+    type: sparql-query
+    endpoint: https://query.wikidata.org/sparql
+    query: |
+      SELECT ?item ?label
+      WHERE {
+        ?item wdt:P31 wd:Q5 .
+        ?item rdfs:label ?label .
+        FILTER(LANG(?label) = "en")
+      }
+      LIMIT 1000
+    format: json
+    default_field_type: text
 
 models:
   - name: primary_model
@@ -248,12 +247,12 @@ embeddings:
 indices:
   - name: wikidata_keyword
     type: keyword
-    text_data: data/text/wikidata
+    data: data/text/wikidata
     output: indices/wikidata/keyword
 
   - name: wikidata_semantic
-    type: text-embedding
-    text_data: data/text/wikidata
+    type: embedding-with-data
+    data: data/text/wikidata
     embedding_data: data/embeddings/wikidata
     output: indices/wikidata/semantic
     params:
@@ -275,23 +274,23 @@ server:
         let dataset = &config.datasets.as_ref().unwrap()[0];
         assert_eq!(dataset.name, "test-dataset");
         assert_eq!(dataset.output, PathBuf::from("data/text/test"));
-        match &dataset.data_type {
-            DataType::Text { source } => match source {
-                TextSource::SparqlQuery {
-                    endpoint,
-                    query,
-                    path,
-                    format,
-                    headers,
-                } => {
-                    assert_eq!(endpoint, "https://query.wikidata.org/sparql");
-                    assert!(query.as_ref().unwrap().contains("SELECT ?item ?label"));
-                    assert!(path.is_none());
-                    assert_eq!(format, &SPARQLResultFormat::JSON);
-                    assert!(headers.is_none());
-                }
-                _ => panic!("Expected SparqlQuery source"),
-            },
+        match &dataset.data_source {
+            DataSource::SparqlQuery {
+                endpoint,
+                query,
+                path,
+                format,
+                default_field_type,
+                headers,
+            } => {
+                assert_eq!(endpoint, "https://query.wikidata.org/sparql");
+                assert!(query.as_ref().unwrap().contains("SELECT ?item ?label"));
+                assert!(path.is_none());
+                assert_eq!(format, &SPARQLResultFormat::JSON);
+                assert!(headers.is_none());
+                assert_eq!(default_field_type, &FieldType::Text);
+            }
+            _ => panic!("Expected SparqlQuery source"),
         }
 
         assert_eq!(config.models.as_ref().unwrap().len(), 1);

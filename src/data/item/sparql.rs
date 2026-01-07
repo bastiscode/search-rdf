@@ -224,6 +224,7 @@ pub fn guess_sparql_result_format_from_extension(file_path: &Path) -> Result<SPA
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::item::Field;
     use std::io::Cursor;
 
     #[test]
@@ -254,9 +255,8 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
         assert_eq!(items[0].num_fields(), 2);
-        assert_eq!(items[0].fields[0].as_str(), "Universe");
-        assert_eq!(items[0].fields[1].as_str(), "Cosmos");
-        assert!(items[0].fields[0].is_text());
+        assert_eq!(items[0].fields[0], Field::Text("Universe".to_string()));
+        assert_eq!(items[0].fields[1], Field::Text("Cosmos".to_string()));
     }
 
     #[test]
@@ -295,14 +295,14 @@ mod tests {
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
         assert_eq!(items[0].num_fields(), 1);
-        assert_eq!(items[0].fields[0].as_str(), "First");
+        assert_eq!(items[0].fields[0], Field::Text("First".to_string()));
         assert_eq!(items[1].identifier, "http://example.org/Q2");
         assert_eq!(items[1].num_fields(), 2);
-        assert_eq!(items[1].fields[0].as_str(), "Second");
-        assert_eq!(items[1].fields[1].as_str(), "Another");
+        assert_eq!(items[1].fields[0], Field::Text("Second".to_string()));
+        assert_eq!(items[1].fields[1], Field::Text("Another".to_string()));
         assert_eq!(items[2].identifier, "http://example.org/Q3");
         assert_eq!(items[2].num_fields(), 1);
-        assert_eq!(items[2].fields[0].as_str(), "Third");
+        assert_eq!(items[2].fields[0], Field::Text("Third".to_string()));
     }
 
     #[test]
@@ -414,8 +414,8 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
         assert_eq!(items[0].num_fields(), 2);
-        assert_eq!(items[0].fields[0].as_str(), "Universe");
-        assert_eq!(items[0].fields[1].as_str(), "Cosmos");
+        assert_eq!(items[0].fields[0], Field::Text("Universe".to_string()));
+        assert_eq!(items[0].fields[1], Field::Text("Cosmos".to_string()));
     }
 
     #[test]
@@ -447,18 +447,22 @@ mod tests {
 </sparql>"#;
 
         let cursor = Cursor::new(sparql_xml);
-        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::XML)
+        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::XML, FieldType::Text)
             .expect("Failed to create iterator")
             .collect::<Result<Vec<_>>>()
             .expect("Failed to parse SPARQL XML");
 
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
-        assert_eq!(items[0].fields, vec!["First"]);
+        assert_eq!(items[0].num_fields(), 1);
+        assert_eq!(items[0].fields[0], Field::Text("First".to_string()));
         assert_eq!(items[1].identifier, "http://example.org/Q2");
-        assert_eq!(items[1].fields, vec!["Second", "Another"]);
+        assert_eq!(items[1].num_fields(), 2);
+        assert_eq!(items[1].fields[0], Field::Text("Second".to_string()));
+        assert_eq!(items[1].fields[1], Field::Text("Another".to_string()));
         assert_eq!(items[2].identifier, "http://example.org/Q3");
-        assert_eq!(items[2].fields, vec!["Third"]);
+        assert_eq!(items[2].num_fields(), 1);
+        assert_eq!(items[2].fields[0], Field::Text("Third".to_string()));
     }
 
     #[test]
@@ -469,15 +473,18 @@ mod tests {
             <http://example.org/Q2>\t\"Earth\"";
 
         let cursor = Cursor::new(sparql_tsv);
-        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::TSV)
+        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::TSV, FieldType::Text)
             .expect("Failed to create iterator")
             .collect::<Result<Vec<_>>>()
             .expect("Failed to parse SPARQL TSV");
 
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
-        assert_eq!(items[0].fields, vec!["Universe", "Cosmos"]);
+        assert_eq!(items[0].num_fields(), 2);
+        assert_eq!(items[0].fields[0], Field::Text("Universe".to_string()));
+        assert_eq!(items[0].fields[1], Field::Text("Cosmos".to_string()));
         assert_eq!(items[1].identifier, "http://example.org/Q2");
-        assert_eq!(items[1].fields, vec!["Earth"]);
+        assert_eq!(items[1].num_fields(), 1);
+        assert_eq!(items[1].fields[0], Field::Text("Earth".to_string()));
     }
 }
