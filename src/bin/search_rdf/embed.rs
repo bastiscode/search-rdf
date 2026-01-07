@@ -4,14 +4,15 @@ use log::info;
 use memmap2::Mmap;
 use safetensors::serialize_to_file;
 use safetensors::tensor::{Dtype, TensorView};
+use search_rdf::data::item::FieldRef;
 use search_rdf::model::Embed;
 use std::collections::HashMap;
 use std::fs::{File, create_dir_all, remove_file};
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
+use search_rdf::data::Data;
 use search_rdf::data::DataSource;
-use search_rdf::data::text::TextData;
 use search_rdf::model::{EmbeddingModel, EmbeddingParams};
 use search_rdf::utils::progress_bar;
 
@@ -83,7 +84,7 @@ pub fn run(config_path: &Path, force: bool) -> Result<()> {
                 dataset,
                 batch_size,
             } => {
-                build_text_embeddings(
+                build_embeddings(
                     config_dir,
                     dataset,
                     &embed_config.output,
@@ -104,7 +105,20 @@ pub fn run(config_path: &Path, force: bool) -> Result<()> {
     Ok(())
 }
 
-fn build_text_embeddings(
+fn get_text_fields<'f>(fields: &[FieldRef<'f>]) -> Result<Vec<&'f str>> {
+    fields
+        .iter()
+        .map(|f| {
+            if f.is_text() {
+                Ok(f.as_str())
+            } else {
+                Err(anyhow!("Non-text field encountered for embedding"))
+            }
+        })
+        .collect()
+}
+
+fn build_embeddings(
     base_dir: &Path,
     dataset: &Path,
     output: &Path,
@@ -113,14 +127,12 @@ fn build_text_embeddings(
     model: &EmbeddingModel,
 ) -> Result<()> {
     // Load text data
-    let text_data = TextData::load(&base_dir.join(dataset)).context(format!(
-        "Failed to load text data from: {}",
-        dataset.display()
-    ))?;
+    let text_data = Data::load(&base_dir.join(dataset))
+        .context(format!("Failed to load data from: {}", dataset.display()))?;
 
-    info!("Loaded {} text items", text_data.len());
+    info!("Loaded {} items", text_data.len());
     info!(
-        "Embedding {} text fields with batch size {}...",
+        "Embedding {} fields with batch size {}...",
         text_data.total_fields(),
         batch_size
     );
@@ -169,10 +181,16 @@ fn build_text_embeddings(
         .skip(skip)
         .chunks(batch_size)
     {
-        let chunk: Vec<&str> = chunk.collect();
+        let chunk: Vec<_> = chunk.collect();
         let embeddings = match model {
-            EmbeddingModel::SentenceTransformer(m) => m.embed(&chunk, params)?,
-            EmbeddingModel::Vllm(m) => m.embed(&chunk, params)?,
+            EmbeddingModel::SentenceTransformer(m) => {
+                let texts = get_text_fields(&chunk)?;
+                m.embed(&texts, params)?
+            }
+            EmbeddingModel::Vllm(m) => {
+                let texts = get_text_fields(&chunk)?;
+                m.embed(&texts, params)?
+            }
         };
         pb.inc(embeddings.len() as u64);
         embeddings

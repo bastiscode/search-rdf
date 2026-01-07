@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use anyhow::{Result, anyhow};
 use axum::body::Bytes;
-use axum::extract::{Path as AxumPath, Query, State};
+use axum::extract::{Path as AxumPath, Query as AxumQuery, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use log::info;
@@ -23,7 +23,7 @@ use spargebra::{Query as SparqlQuery, SparqlParser};
 
 use crate::search_rdf::index::{SearchIndex, SearchParams};
 use crate::search_rdf::serve::search::{
-    MatchInfo, perform_text_search, perform_text_search_with_filter,
+    MatchInfo, Query, perform_search, perform_search_with_filter,
 };
 
 use super::search::SearchMatch;
@@ -57,7 +57,7 @@ fn search_match_to_solution(
     ]);
 
     // Extract identifier and field from MatchInfo if available
-    if let MatchInfo::Text { identifier, field } = search_match.info {
+    if let MatchInfo::Field { identifier, field } = search_match.info {
         values.push(Some(Term::NamedNode(NamedNode::new(identifier).map_err(
             |e| anyhow!("Failed to create IRI from identifier: {e}"),
         )?)));
@@ -81,7 +81,7 @@ fn search_match_to_solution(
 fn get_id_from_identifier(index: &SearchIndex, identifier: &str) -> Option<u32> {
     match index {
         SearchIndex::Keyword(idx) => idx.data().id_from_identifier(identifier),
-        SearchIndex::TextEmbedding(idx) => idx.data().text_data().id_from_identifier(identifier),
+        SearchIndex::EmbeddingWithData(idx) => idx.data().data().id_from_identifier(identifier),
         _ => None,
     }
 }
@@ -261,8 +261,11 @@ pub async fn service(
         )
     })?;
 
+    // prepare query
+    let query = Query::Text(query);
+
     // perform search
-    let matches = perform_text_search(index, vec![query], params, model).await?;
+    let matches = perform_search(index, vec![query], params, model).await?;
 
     // write results
     let mut buffer = Vec::new();
@@ -296,7 +299,7 @@ pub async fn service(
         // Extract identifier and field from MatchInfo if available
         let mut identifier_term = None;
         let mut field_term = None;
-        if let MatchInfo::Text { identifier, field } = search_match.info {
+        if let MatchInfo::Field { identifier, field } = search_match.info {
             identifier_term = Some(Term::NamedNode(
                 NamedNode::new(identifier)
                     .map_err(|e| anyhow!("Failed to create IRI from identifier: {e}"))?,
@@ -383,7 +386,7 @@ fn default_rowvar() -> String {
 pub async fn qlproxy(
     AxumPath(index_name): AxumPath<String>,
     State(state): State<AppState>,
-    Query(params): Query<QlProxyParams>,
+    AxumQuery(params): AxumQuery<QlProxyParams>,
     body: Bytes,
 ) -> Result<Response, AppError> {
     info!(
@@ -485,11 +488,13 @@ pub async fn qlproxy(
     let id_to_row_clone = id_to_row.clone();
     let filter = move |id| id_to_row_clone.contains_key(&id);
 
+    // Prepare query
+    let query = Query::Text(params.query);
+
     // Always perform filtered search
     let start = Instant::now();
     let matches =
-        perform_text_search_with_filter(index, vec![params.query], params.params, model, filter)
-            .await?;
+        perform_search_with_filter(index, vec![query], params.params, model, filter).await?;
 
     info!("Search completed in {}ms", start.elapsed().as_millis());
 

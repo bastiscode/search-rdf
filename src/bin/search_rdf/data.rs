@@ -1,6 +1,6 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use log::info;
-use search_rdf::data::TextData;
+use search_rdf::data::Data;
 use search_rdf::data::item::Item;
 use search_rdf::data::item::jsonl::stream_items_from_jsonl_file;
 use search_rdf::data::item::sparql::{
@@ -11,7 +11,7 @@ use std::fs::read_to_string;
 use std::io::Read;
 use std::path::Path;
 
-use crate::search_rdf::config::{Config, DataType, TextSource};
+use crate::search_rdf::config::{Config, DataSource};
 
 pub fn run(config_path: &Path, force: bool) -> Result<()> {
     let config = Config::load(config_path)?;
@@ -38,44 +38,48 @@ pub fn run(config_path: &Path, force: bool) -> Result<()> {
         }
 
         info!("[BUILD] {}...", dataset.name);
-        match &dataset.data_type {
-            DataType::Text { source } => {
-                build_text_data(config_dir, source, &dataset.output)?;
-            }
-        }
-
+        build_data(config_dir, &dataset.data_source, &dataset.output)?;
         info!("[OK] {} -> {}", dataset.name, dataset.output.display());
     }
 
     Ok(())
 }
 
-fn build_text_data(base_dir: &Path, source: &TextSource, output: &Path) -> Result<()> {
+fn build_data(base_dir: &Path, source: &DataSource, output: &Path) -> Result<()> {
     // Get iterator of Items based on source type
     let items: Box<dyn Iterator<Item = Result<Item>>> = match source {
-        TextSource::Jsonl { path } => {
+        DataSource::Jsonl { path } => {
             info!("Streaming text data from JSONL file: {}", path.display());
             Box::new(stream_items_from_jsonl_file(path)?)
         }
-        TextSource::Sparql { path, format } => {
+        DataSource::Sparql {
+            path,
+            format,
+            default_field_type,
+        } => {
             info!(
                 "Streaming text data from SPARQL result file: {}",
                 path.display()
             );
-            Box::new(stream_items_from_sparql_result_file(path, *format)?)
+            Box::new(stream_items_from_sparql_result_file(
+                path,
+                *format,
+                *default_field_type,
+            )?)
         }
-        TextSource::SparqlQuery {
+        DataSource::SparqlQuery {
             endpoint,
             query,
             path,
             format,
             headers,
+            default_field_type,
         } => {
             let query = match (query, path) {
                 (Some(q), None) => q.clone(),
                 (None, Some(p)) => read_to_string(p)?,
                 _ => {
-                    return Err(anyhow::anyhow!(
+                    return Err(anyhow!(
                         "Either 'query' or 'path' must be provided, but not both."
                     ));
                 }
@@ -85,7 +89,7 @@ fn build_text_data(base_dir: &Path, source: &TextSource, output: &Path) -> Resul
             let response = execute_sparql_query(endpoint, &query, *format, headers.as_ref())?;
 
             // Create iterator from response
-            let items = stream_items_from_sparql_result(response, *format)?;
+            let items = stream_items_from_sparql_result(response, *format, *default_field_type)?;
 
             Box::new(items)
         }
@@ -94,7 +98,7 @@ fn build_text_data(base_dir: &Path, source: &TextSource, output: &Path) -> Resul
     info!("Building text dataset...");
 
     // Build TextData
-    TextData::build(items, &base_dir.join(output))?;
+    Data::build(items, &base_dir.join(output))?;
 
     Ok(())
 }

@@ -5,6 +5,7 @@ use crate::{
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+pub mod image;
 pub mod text;
 
 #[derive(Debug, Clone)]

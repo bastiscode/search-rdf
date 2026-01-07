@@ -1,4 +1,5 @@
 pub mod embedding;
+pub mod python;
 pub mod text;
 
 use crate::data::DataSource;
@@ -6,10 +7,10 @@ use anyhow::Result;
 use pyo3::IntoPyObject;
 use std::path::Path;
 
-pub use embedding::{EmbeddingIndex, EmbeddingIndexParams, Metric};
-pub use text::embedding::TextEmbeddingIndex;
-pub use text::keyword;
-pub use text::keyword::KeywordIndex;
+pub use embedding::EmbeddingIndexWithData;
+pub use embedding::{EmbeddingIndex, EmbeddingIndexParams, EmbeddingSearchParams, Metric};
+pub use text::full_text::{FullTextIndex, FullTextSearchParams};
+pub use text::keyword::{KeywordIndex, KeywordSearchParams};
 
 /// Result from a search query
 #[derive(Debug, Clone, PartialEq, IntoPyObject)]

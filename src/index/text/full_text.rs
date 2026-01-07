@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    data::{DataSource, TextData},
+    data::{Data, DataSource},
     index::{Match, Search, SearchParamsExt},
     utils::{load_u32_vec, progress_bar},
 };
@@ -22,7 +22,7 @@ use tantivy::schema::*;
 use tantivy::{IndexReader, collector::TopDocs};
 
 struct Inner {
-    data: TextData,
+    data: Data,
     index: Index,
     reader: IndexReader,
     parser: QueryParser,
@@ -89,7 +89,7 @@ impl SearchParamsExt for FullTextSearchParams {
 }
 
 impl Search for FullTextIndex {
-    type Data = TextData;
+    type Data = Data;
     type Query<'e> = &'e str;
     type BuildParams = ();
     type SearchParams = FullTextSearchParams;
@@ -121,14 +121,18 @@ impl Search for FullTextIndex {
         let mut field_to_data_file =
             BufWriter::new(File::create(index_dir.join("index.field-to-data"))?);
         let mut field_id: u32 = 0;
-        for (id, texts) in data.items() {
-            for text in texts {
+        for (id, fields) in data.items() {
+            for field in fields {
                 if field_id == u32::MAX {
                     return Err(anyhow!("too many fields, max {} supported", u32::MAX));
                 }
 
+                if !field.is_text() {
+                    return Err(anyhow!("Full-text index can only be built on text fields"));
+                }
+
                 let mut doc = TantivyDocument::default();
-                doc.add_text(text_field, text);
+                doc.add_text(text_field, field.as_str());
                 doc.add_u64(field_id_field, field_id as u64);
                 index_writer.add_document(doc)?;
 

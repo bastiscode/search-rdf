@@ -17,7 +17,7 @@ use sparesults::{
     ReaderQueryResultsParserOutput,
 };
 
-use crate::data::item::Item;
+use crate::data::item::{FieldType, Item, StringField};
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -53,7 +53,8 @@ where
     I: IntoIterator<Item = Result<QuerySolution, QueryResultsParseError>>,
 {
     identifier: Option<String>,
-    fields: Vec<String>,
+    fields: Vec<StringField>,
+    default_field_type: FieldType,
     inner: I,
 }
 
@@ -61,19 +62,23 @@ impl<I> SPARQLResultIterator<I>
 where
     I: IntoIterator<Item = Result<QuerySolution, QueryResultsParseError>>,
 {
-    pub fn new(inner: I) -> Self {
+    pub fn new(inner: I, default_field_type: FieldType) -> Self {
         Self {
             identifier: None,
             fields: Vec::new(),
+            default_field_type,
             inner,
         }
     }
 }
 
-fn parse_solution(solution: &QuerySolution) -> Result<(String, String)> {
-    if solution.len() != 2 {
+fn parse_solution(
+    solution: &QuerySolution,
+    default_field_type: FieldType,
+) -> Result<(String, StringField)> {
+    if solution.len() != 2 && solution.len() != 3 {
         return Err(anyhow!(
-            "Expected exactly 2 variables in solution, found {}",
+            "Expected 2 or 3 variables in solution, found {}",
             solution.len()
         ));
     }
@@ -102,7 +107,7 @@ fn parse_solution(solution: &QuerySolution) -> Result<(String, String)> {
         ));
     };
 
-    let field = match literal.datatype() {
+    let value = match literal.datatype() {
         xsd::STRING | rdf::LANG_STRING => literal.value().to_string(),
         _ => {
             return Err(anyhow!(
@@ -112,7 +117,19 @@ fn parse_solution(solution: &QuerySolution) -> Result<(String, String)> {
         }
     };
 
-    Ok((identifier, field))
+    let field_type = if let Some(Some(third)) = values.get(2) {
+        let Term::Literal(type_literal) = third else {
+            return Err(anyhow!(
+                "Expected third variable (type) to be a literal, found {:?}",
+                third
+            ));
+        };
+        serde_plain::from_str(type_literal.value())?
+    } else {
+        default_field_type
+    };
+
+    Ok((identifier, StringField { value, field_type }))
 }
 
 impl<I> Iterator for SPARQLResultIterator<I>
@@ -131,12 +148,9 @@ where
                 continue;
             };
 
-            let solution = parse_solution(&solution);
-            let Ok((identifier, field)) = solution else {
-                return Some(Err(anyhow!(
-                    "Failed to parse SPARQL solution: {}",
-                    solution.unwrap_err()
-                )));
+            let (identifier, field) = match parse_solution(&solution, self.default_field_type) {
+                Ok(sol) => sol,
+                Err(e) => return Some(Err(anyhow!("Failed to parse SPARQL solution: {}", e))),
             };
 
             if self.identifier.as_ref().is_none_or(|id| id == &identifier) {
@@ -148,19 +162,20 @@ where
             let identifier = self.identifier.replace(identifier)?;
             let fields = take(&mut self.fields);
             self.fields.push(field);
-            return Some(Item::new(identifier, fields));
+            return Some(Item::from_string_fields(identifier, fields));
         }
 
         let identifier = self.identifier.take()?;
         let fields = take(&mut self.fields);
 
-        Some(Item::new(identifier, fields))
+        Some(Item::from_string_fields(identifier, fields))
     }
 }
 
 pub fn stream_items_from_sparql_result<R: Read>(
     reader: R,
     format: SPARQLResultFormat,
+    default_field_type: FieldType,
 ) -> Result<impl Iterator<Item = Result<Item>>> {
     let json_parser = QueryResultsParser::from_format(format.into());
 
@@ -172,15 +187,16 @@ pub fn stream_items_from_sparql_result<R: Read>(
         return Err(anyhow!("Expected SPARQL result in {:?} format", format));
     };
 
-    Ok(SPARQLResultIterator::new(solutions))
+    Ok(SPARQLResultIterator::new(solutions, default_field_type))
 }
 
 pub fn stream_items_from_sparql_result_file(
     file_path: &Path,
     format: SPARQLResultFormat,
+    default_field_type: FieldType,
 ) -> Result<impl Iterator<Item = Result<Item>>> {
     let reader = BufReader::new(File::open(file_path)?);
-    stream_items_from_sparql_result(reader, format)
+    stream_items_from_sparql_result(reader, format, default_field_type)
 }
 
 pub fn guess_sparql_result_format_from_extension(file_path: &Path) -> Result<SPARQLResultFormat> {
@@ -229,14 +245,18 @@ mod tests {
         }"#;
 
         let cursor = Cursor::new(sparql_json);
-        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
-            .expect("Failed to create iterator")
-            .collect::<Result<Vec<_>>>()
-            .expect("Failed to parse SPARQL JSON");
+        let items: Vec<_> =
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON, FieldType::Text)
+                .expect("Failed to create iterator")
+                .collect::<Result<Vec<_>>>()
+                .expect("Failed to parse SPARQL JSON");
 
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
-        assert_eq!(items[0].fields, vec!["Universe", "Cosmos"]);
+        assert_eq!(items[0].num_fields(), 2);
+        assert_eq!(items[0].fields[0].as_str(), "Universe");
+        assert_eq!(items[0].fields[1].as_str(), "Cosmos");
+        assert!(items[0].fields[0].is_text());
     }
 
     #[test]
@@ -266,18 +286,23 @@ mod tests {
         }"#;
 
         let cursor = Cursor::new(sparql_json);
-        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
-            .expect("Failed to create iterator")
-            .collect::<Result<Vec<_>>>()
-            .expect("Failed to parse SPARQL JSON");
+        let items: Vec<_> =
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON, FieldType::Text)
+                .expect("Failed to create iterator")
+                .collect::<Result<Vec<_>>>()
+                .expect("Failed to parse SPARQL JSON");
 
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
-        assert_eq!(items[0].fields, vec!["First"]);
+        assert_eq!(items[0].num_fields(), 1);
+        assert_eq!(items[0].fields[0].as_str(), "First");
         assert_eq!(items[1].identifier, "http://example.org/Q2");
-        assert_eq!(items[1].fields, vec!["Second", "Another"]);
+        assert_eq!(items[1].num_fields(), 2);
+        assert_eq!(items[1].fields[0].as_str(), "Second");
+        assert_eq!(items[1].fields[1].as_str(), "Another");
         assert_eq!(items[2].identifier, "http://example.org/Q3");
-        assert_eq!(items[2].fields, vec!["Third"]);
+        assert_eq!(items[2].num_fields(), 1);
+        assert_eq!(items[2].fields[0].as_str(), "Third");
     }
 
     #[test]
@@ -290,10 +315,11 @@ mod tests {
         }"#;
 
         let cursor = Cursor::new(sparql_json);
-        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
-            .expect("Failed to create iterator")
-            .collect::<Result<Vec<_>>>()
-            .expect("Failed to parse SPARQL JSON");
+        let items: Vec<_> =
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON, FieldType::Text)
+                .expect("Failed to create iterator")
+                .collect::<Result<Vec<_>>>()
+                .expect("Failed to parse SPARQL JSON");
 
         assert_eq!(items.len(), 0);
     }
@@ -301,13 +327,14 @@ mod tests {
     #[test]
     fn test_invalid_binding_wrong_number_of_vars() {
         let sparql_json = r#"{
-            "head": {"vars": ["s", "label", "extra"]},
+            "head": {"vars": ["s", "label", "extra", "extra2"]},
             "results": {
                 "bindings": [
                     {
                         "s": {"type": "uri", "value": "http://example.org/Q1"},
                         "label": {"type": "literal", "value": "First"},
-                        "extra": {"type": "literal", "value": "Extra"}
+                        "extra": {"type": "literal", "value": "Extra"},
+                        "extra2": {"type": "literal", "value": "Extra2"}
                     }
                 ]
             }
@@ -315,7 +342,7 @@ mod tests {
 
         let cursor = Cursor::new(sparql_json);
         let result: Result<Vec<_>> =
-            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON, FieldType::Text)
                 .expect("Failed to create iterator")
                 .collect();
 
@@ -324,7 +351,7 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("Expected exactly 2 variables")
+                .contains("Expected 2 or 3 variables")
         );
     }
 
@@ -344,7 +371,7 @@ mod tests {
 
         let cursor = Cursor::new(sparql_json);
         let result: Result<Vec<_>> =
-            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON)
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON, FieldType::Text)
                 .expect("Failed to create iterator")
                 .collect();
 
@@ -378,14 +405,17 @@ mod tests {
 </sparql>"#;
 
         let cursor = Cursor::new(sparql_xml);
-        let items: Vec<_> = stream_items_from_sparql_result(cursor, SPARQLResultFormat::XML)
-            .expect("Failed to create iterator")
-            .collect::<Result<Vec<_>>>()
-            .expect("Failed to parse SPARQL XML");
+        let items: Vec<_> =
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::XML, FieldType::Text)
+                .expect("Failed to create iterator")
+                .collect::<Result<Vec<_>>>()
+                .expect("Failed to parse SPARQL XML");
 
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
-        assert_eq!(items[0].fields, vec!["Universe", "Cosmos"]);
+        assert_eq!(items[0].num_fields(), 2);
+        assert_eq!(items[0].fields[0].as_str(), "Universe");
+        assert_eq!(items[0].fields[1].as_str(), "Cosmos");
     }
 
     #[test]

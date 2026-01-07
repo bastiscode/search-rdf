@@ -1,3 +1,5 @@
+use crate::data::Data;
+use crate::data::item::FieldRef;
 use crate::data::map::OrderedIdMap;
 
 use super::DataSource;
@@ -160,14 +162,14 @@ impl Tensors {
 }
 
 #[derive(Debug)]
-struct Inner {
+struct EmbeddingsInner {
     tensors: Tensors,
     id_map: OrderedIdMap,
 }
 
 #[derive(Clone, Debug)]
 pub struct Embeddings {
-    inner: Arc<Inner>,
+    inner: Arc<EmbeddingsInner>,
 }
 
 impl Embeddings {
@@ -200,7 +202,7 @@ impl Embeddings {
         let id_map = OrderedIdMap::load(&id_map_file)?;
 
         Ok(Self {
-            inner: Arc::new(Inner { tensors, id_map }),
+            inner: Arc::new(EmbeddingsInner { tensors, id_map }),
         })
     }
 
@@ -244,10 +246,6 @@ impl DataSource for Embeddings {
         )
     }
 
-    fn data_type(&self) -> &'static str {
-        "embedding"
-    }
-
     fn total_fields(&self) -> u32 {
         self.inner.id_map.total_count
     }
@@ -261,6 +259,98 @@ impl DataSource for Embeddings {
 
     fn max_fields(&self) -> u16 {
         self.inner.id_map.max_count
+    }
+}
+
+#[derive(Debug)]
+struct EmbeddingsWithDataInner {
+    data: Data,
+    tensors: Tensors,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmbeddingsWithData {
+    inner: Arc<EmbeddingsWithDataInner>,
+}
+
+impl EmbeddingsWithData {
+    pub fn load(data: Data, embeddings_file: &Path) -> Result<Self> {
+        let tensors = Tensors::load(embeddings_file)?;
+
+        if data.total_fields() as usize != tensors.len() {
+            return Err(anyhow!(
+                "Number of embeddings ({}) does not match number of text fields ({})",
+                tensors.len(),
+                data.total_fields()
+            ));
+        }
+
+        Ok(Self {
+            inner: Arc::new(EmbeddingsWithDataInner { data, tensors }),
+        })
+    }
+
+    /// Get the number of dimensions
+    pub fn num_dimensions(&self) -> usize {
+        self.inner.tensors.num_dimensions()
+    }
+
+    /// Get the model name from metadata
+    pub fn model(&self) -> &str {
+        &self.inner.tensors.model
+    }
+
+    pub fn embedding_items(&self) -> impl Iterator<Item = (u32, Vec<EmbeddingRef<'_>>)> + '_ {
+        let data_map = self.inner.data.data_map();
+        let mut start = 0;
+        (0..data_map.len()).filter_map(move |index| {
+            let count = data_map.count(index)? as usize;
+            let end = start + count;
+
+            let embeddings = (start..end)
+                .map(|tensor_idx| self.inner.tensors.get(tensor_idx))
+                .collect::<Option<_>>()?;
+
+            start = end;
+
+            Some((index as u32, embeddings))
+        })
+    }
+
+    pub fn data(&self) -> &Data {
+        &self.inner.data
+    }
+}
+
+impl DataSource for EmbeddingsWithData {
+    type Field<'a> = FieldRef<'a>;
+
+    fn len(&self) -> usize {
+        self.inner.data.len()
+    }
+
+    fn num_fields(&self, id: u32) -> Option<u16> {
+        self.inner.data.num_fields(id)
+    }
+
+    fn field(&self, id: u32, field: usize) -> Option<Self::Field<'_>> {
+        self.inner.data.field(id, field)
+    }
+
+    fn fields(&self, id: u32) -> Option<impl Iterator<Item = Self::Field<'_>>> {
+        self.inner.data.fields(id)
+    }
+
+    fn total_fields(&self) -> u32 {
+        self.inner.data.total_fields()
+    }
+
+    fn items(&self) -> impl Iterator<Item = (u32, Vec<Self::Field<'_>>)> + '_ {
+        self.inner.data.items()
+    }
+
+    fn max_fields(&self) -> u16 {
+        self.inner.data.max_fields()
     }
 }
 

@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 
 use crate::data::item::sparql::SPARQLResultFormat;
-use crate::data::text::{TextData as RustTextData, TextEmbeddings as RustTextEmbeddings};
+use crate::data::{Data as RustData, embedding::EmbeddingsWithData as RustEmbeddingsWithData};
 use crate::data::{DataSource, Precision};
 use anyhow::{Result, anyhow};
 use pyo3::prelude::*;
@@ -28,8 +28,8 @@ impl<'py> IntoPyObject<'py> for Precision {
 
 #[derive(Clone)]
 #[pyclass]
-pub struct TextData {
-    pub inner: RustTextData,
+pub struct Data {
+    pub inner: RustData,
 }
 
 impl<'a, 'py> FromPyObject<'a, 'py> for SPARQLResultFormat {
@@ -53,11 +53,11 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SPARQLResultFormat {
 }
 
 #[pymethods]
-impl TextData {
+impl Data {
     #[staticmethod]
     pub fn load(data_dir: &str) -> Result<Self> {
-        let inner = RustTextData::load(data_dir.as_ref())?;
-        Ok(TextData { inner })
+        let inner = RustData::load(data_dir.as_ref())?;
+        Ok(Data { inner })
     }
 
     pub fn __len__(&self) -> usize {
@@ -68,8 +68,8 @@ impl TextData {
         self.inner.is_empty()
     }
 
-    fn __iter__(slf: PyRef<'_, Self>) -> TextDataIterator {
-        TextDataIterator {
+    fn __iter__(slf: PyRef<'_, Self>) -> DataIterator {
+        DataIterator {
             data: slf.inner.clone(),
             index: 0,
         }
@@ -80,17 +80,17 @@ impl TextData {
     }
 
     pub fn field(&self, id: u32, field: usize) -> Option<&str> {
-        self.inner.field(id, field)
+        self.inner.field(id, field).map(|s| s.as_str())
     }
 
-    pub fn fields(&self, id: u32) -> Option<Vec<String>> {
+    pub fn fields(&self, id: u32) -> Option<Vec<&str>> {
         self.inner
             .fields(id)
-            .map(|vec| vec.into_iter().map(|s| s.to_string()).collect())
+            .map(|vec| vec.into_iter().map(|s| s.as_str()).collect())
     }
 
-    pub fn identifier(&self, id: u32) -> Option<String> {
-        self.inner.identifier(id).map(|s| s.to_string())
+    pub fn identifier(&self, id: u32) -> Option<&str> {
+        self.inner.identifier(id)
     }
 
     pub fn id_from_identifier(&self, identifier: &str) -> Option<u32> {
@@ -99,19 +99,23 @@ impl TextData {
 }
 
 #[pyclass]
-pub struct TextDataIterator {
-    data: RustTextData,
+pub struct DataIterator {
+    data: RustData,
     index: u32,
 }
 
 #[pymethods]
-impl TextDataIterator {
+impl DataIterator {
     fn __iter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
         slf
     }
 
     fn __next__(&mut self) -> Option<Vec<&str>> {
-        let fields = self.data.fields(self.index)?.collect();
+        let fields = self
+            .data
+            .fields(self.index)?
+            .map(|field| field.as_str())
+            .collect();
         self.index += 1;
         Some(fields)
     }
@@ -119,16 +123,16 @@ impl TextDataIterator {
 
 #[derive(Clone)]
 #[pyclass]
-pub struct TextEmbeddings {
-    pub inner: RustTextEmbeddings,
+pub struct Embeddings {
+    pub inner: RustEmbeddingsWithData,
 }
 
 #[pymethods]
-impl TextEmbeddings {
+impl Embeddings {
     #[staticmethod]
-    pub fn load(data: TextData, embeddings_file: &str) -> Result<Self> {
-        let inner = RustTextEmbeddings::load(data.inner, embeddings_file.as_ref())?;
-        Ok(TextEmbeddings { inner })
+    pub fn load(data: Data, embeddings_file: &str) -> Result<Self> {
+        let inner = RustEmbeddingsWithData::load(data.inner, embeddings_file.as_ref())?;
+        Ok(Self { inner })
     }
 
     pub fn __len__(&self) -> usize {

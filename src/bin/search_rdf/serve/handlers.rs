@@ -32,7 +32,7 @@ pub async fn list_indices(State(state): State<AppState>) -> Json<Vec<IndexInfo>>
                 SearchIndex::Keyword(..) => vec!["text"],
                 SearchIndex::FullText(..) => vec!["text"],
                 SearchIndex::Embedding(..) => vec!["embedding"],
-                SearchIndex::TextEmbedding(..) => vec!["text", "embedding"],
+                SearchIndex::EmbeddingWithData(..) => vec!["text", "embedding"],
             },
         })
         .collect();

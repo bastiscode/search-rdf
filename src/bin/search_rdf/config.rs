@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use search_rdf::data::item::FieldType;
 use search_rdf::data::item::sparql::SPARQLResultFormat;
 use search_rdf::index::EmbeddingIndexParams;
 use search_rdf::model::EmbeddingParams;
@@ -27,18 +28,12 @@ pub struct DataConfig {
     pub name: String,
     pub output: PathBuf,
     #[serde(flatten)]
-    pub data_type: DataType,
+    pub data_source: DataSource,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum DataType {
-    Text { source: TextSource },
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TextSource {
+pub enum DataSource {
     #[serde(rename = "sparql-query")]
     SparqlQuery {
         endpoint: String,
@@ -46,10 +41,12 @@ pub enum TextSource {
         path: Option<PathBuf>,
         format: SPARQLResultFormat,
         headers: Option<HashMap<String, String>>,
+        default_field_type: FieldType,
     },
     Sparql {
         path: PathBuf,
         format: SPARQLResultFormat,
+        default_field_type: FieldType,
     },
     Jsonl {
         path: PathBuf,
@@ -125,15 +122,15 @@ pub struct IndexConfig {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IndexType {
     Keyword {
-        text_data: PathBuf,
+        data: PathBuf,
     },
     #[serde(rename = "full-text")]
     FullText {
-        text_data: PathBuf,
+        data: PathBuf,
     },
     #[serde(rename = "text-embedding")]
-    TextEmbedding {
-        text_data: PathBuf,
+    EmbeddingWithData {
+        data: PathBuf,
         embedding_data: PathBuf,
         model: String,
         #[serde(default)]
@@ -149,7 +146,7 @@ pub enum IndexType {
 impl IndexType {
     pub fn get_model(&self) -> Option<&str> {
         match self {
-            IndexType::TextEmbedding { model, .. } => Some(model),
+            IndexType::EmbeddingWithData { model, .. } => Some(model),
             _ => None,
         }
     }

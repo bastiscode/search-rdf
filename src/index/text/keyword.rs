@@ -1,5 +1,5 @@
+use crate::data::Data;
 use crate::data::DataSource;
-use crate::data::text::TextData;
 use crate::index::{Match, Search, SearchParamsExt};
 use crate::utils::{load_u32_vec, load_usize_vec_from_u64, progress_bar};
 use anyhow::{Result, anyhow};
@@ -226,7 +226,7 @@ const U32_SIZE: usize = size_of::<u32>();
 
 #[derive(Debug)]
 struct Inner {
-    data: TextData,
+    data: Data,
     keywords: Mmap,
     keyword_offsets: Vec<usize>,
     inv_lists: Mmap,
@@ -555,7 +555,7 @@ impl SearchParamsExt for KeywordSearchParams {
 }
 
 impl Search for KeywordIndex {
-    type Data = TextData;
+    type Data = Data;
     type Query<'q> = &'q str;
     type BuildParams = ();
     type SearchParams = KeywordSearchParams;
@@ -574,12 +574,19 @@ impl Search for KeywordIndex {
 
         let mut field_id = 0;
         for (id, fields) in data.items() {
-            for name in fields.into_iter().map(normalize) {
+            for field in fields.into_iter() {
                 if field_id == u32::MAX {
                     return Err(anyhow!("too many fields, max {} supported", u32::MAX));
                 }
+
+                if !field.is_text() {
+                    return Err(anyhow!("Keyword index can only be built on text fields"));
+                }
+
+                let text = normalize(field.as_str());
+
                 let mut length: u32 = 0;
-                for word in name.split_whitespace() {
+                for word in text.split_whitespace() {
                     let inv_list = inv_lists.entry(word.to_string()).or_default();
                     inv_list.push(field_id);
                     length += 1;

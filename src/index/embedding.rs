@@ -1,6 +1,6 @@
-use crate::data::Embeddings;
+use crate::data::{Embeddings, EmbeddingsWithData};
 use crate::index::SearchParamsExt;
-use crate::utils::{load_json, progress_bar, write_json};
+use crate::utils::{load_json, load_u32_vec, progress_bar, write_json};
 use crate::{
     data::{
         DataSource,
@@ -9,11 +9,13 @@ use crate::{
     index::{Match, Search},
 };
 use anyhow::{Result, anyhow};
+use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::*;
 use std::cmp::Reverse;
-use std::fs::create_dir_all;
+use std::fs::{File, create_dir_all};
+use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::Arc;
 use usearch::ffi::IndexOptions;
@@ -169,13 +171,90 @@ impl Default for EmbeddingIndexParams {
     }
 }
 
-struct Inner {
+pub fn binary_quantization(embedding: &[f32]) -> Result<Vec<u8>> {
+    if !embedding.len().is_multiple_of(8) {
+        return Err(anyhow!(
+            "Embedding length must be a multiple of 8 for binary quantization"
+        ));
+    }
+    let num_bytes = embedding.len() / 8;
+    let mut binary_emb = vec![0u8; num_bytes];
+    for (i, v) in embedding.iter().enumerate() {
+        if *v <= 0.0 {
+            continue;
+        }
+        let byte_index = i / 8;
+        let bit_index = i % 8;
+        binary_emb[byte_index] |= 1 << bit_index;
+    }
+    Ok(binary_emb)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EmbeddingSearchParams {
+    #[serde(
+        default = "crate::index::default_k",
+        deserialize_with = "deserialize_number_from_string"
+    )]
+    pub k: usize,
+    #[serde(
+        default,
+        rename = "min-score",
+        deserialize_with = "deserialize_option_number_from_string"
+    )]
+    pub min_score: Option<f32>,
+    #[serde(default, deserialize_with = "deserialize_bool_from_anything")]
+    pub exact: bool,
+    #[serde(default, deserialize_with = "deserialize_option_number_from_string")]
+    pub rerank: Option<f32>,
+}
+
+impl Default for EmbeddingSearchParams {
+    fn default() -> Self {
+        Self {
+            k: 10,
+            min_score: None,
+            exact: false,
+            rerank: None,
+        }
+    }
+}
+
+impl EmbeddingSearchParams {
+    pub fn do_rerank(&self) -> bool {
+        self.rerank.is_some()
+    }
+}
+
+impl SearchParamsExt for EmbeddingSearchParams {
+    fn search_k(&self, data: &impl DataSource) -> usize {
+        let mut k = self.k();
+        if let Some(factor) = self.rerank {
+            k = (k as f32 * factor).ceil() as usize;
+        }
+        if self.exact() {
+            k * data.max_fields().max(1) as usize
+        } else {
+            (k as f32 * data.avg_fields()).ceil() as usize
+        }
+    }
+
+    fn k(&self) -> usize {
+        self.k
+    }
+
+    fn exact(&self) -> bool {
+        self.exact
+    }
+}
+
+struct EmbeddingIndexInner {
     data: Embeddings,
     index: Index,
     params: EmbeddingIndexParams,
 }
 
-impl std::fmt::Debug for Inner {
+impl std::fmt::Debug for EmbeddingIndexInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Inner")
             .field("data", &self.data)
@@ -187,11 +266,11 @@ impl std::fmt::Debug for Inner {
 
 #[derive(Debug, Clone)]
 pub struct EmbeddingIndex {
-    inner: Arc<Inner>,
+    inner: Arc<EmbeddingIndexInner>,
 }
 
 impl EmbeddingIndex {
-    pub(crate) fn search(
+    fn search(
         embedding: EmbeddingRef<'_>,
         index: &Index,
         metric: Metric,
@@ -283,83 +362,6 @@ impl EmbeddingIndex {
     }
 }
 
-pub fn binary_quantization(embedding: &[f32]) -> Result<Vec<u8>> {
-    if !embedding.len().is_multiple_of(8) {
-        return Err(anyhow!(
-            "Embedding length must be a multiple of 8 for binary quantization"
-        ));
-    }
-    let num_bytes = embedding.len() / 8;
-    let mut binary_emb = vec![0u8; num_bytes];
-    for (i, v) in embedding.iter().enumerate() {
-        if *v <= 0.0 {
-            continue;
-        }
-        let byte_index = i / 8;
-        let bit_index = i % 8;
-        binary_emb[byte_index] |= 1 << bit_index;
-    }
-    Ok(binary_emb)
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct EmbeddingSearchParams {
-    #[serde(
-        default = "crate::index::default_k",
-        deserialize_with = "deserialize_number_from_string"
-    )]
-    pub k: usize,
-    #[serde(
-        default,
-        rename = "min-score",
-        deserialize_with = "deserialize_option_number_from_string"
-    )]
-    pub min_score: Option<f32>,
-    #[serde(default, deserialize_with = "deserialize_bool_from_anything")]
-    pub exact: bool,
-    #[serde(default, deserialize_with = "deserialize_option_number_from_string")]
-    pub rerank: Option<f32>,
-}
-
-impl Default for EmbeddingSearchParams {
-    fn default() -> Self {
-        Self {
-            k: 10,
-            min_score: None,
-            exact: false,
-            rerank: None,
-        }
-    }
-}
-
-impl EmbeddingSearchParams {
-    pub fn do_rerank(&self) -> bool {
-        self.rerank.is_some()
-    }
-}
-
-impl SearchParamsExt for EmbeddingSearchParams {
-    fn search_k(&self, data: &impl DataSource) -> usize {
-        let mut k = self.k();
-        if let Some(factor) = self.rerank {
-            k = (k as f32 * factor).ceil() as usize;
-        }
-        if self.exact() {
-            k * data.max_fields().max(1) as usize
-        } else {
-            (k as f32 * data.avg_fields()).ceil() as usize
-        }
-    }
-
-    fn k(&self) -> usize {
-        self.k
-    }
-
-    fn exact(&self) -> bool {
-        self.exact
-    }
-}
-
 impl Search for EmbeddingIndex {
     type Data = Embeddings;
     type Query<'q> = EmbeddingRef<'q>;
@@ -440,7 +442,7 @@ impl Search for EmbeddingIndex {
         index.view(index_file.to_str().ok_or_else(|| anyhow!("Invalid path"))?)?;
 
         Ok(Self {
-            inner: Arc::new(Inner {
+            inner: Arc::new(EmbeddingIndexInner {
                 data,
                 index,
                 params,
@@ -454,6 +456,229 @@ impl Search for EmbeddingIndex {
 
     fn index_type(&self) -> &'static str {
         "embedding"
+    }
+
+    fn search(&self, query: Self::Query<'_>, params: &Self::SearchParams) -> Result<Vec<Match>> {
+        self.search_internal(query, params, None::<fn(u32) -> bool>)
+    }
+
+    fn search_with_filter<F>(
+        &self,
+        query: Self::Query<'_>,
+        params: &Self::SearchParams,
+        filter: F,
+    ) -> Result<Vec<Match>>
+    where
+        F: Fn(u32) -> bool,
+    {
+        self.search_internal(query, params, Some(filter))
+    }
+}
+struct EmbeddingIndexWithDataInner {
+    data: EmbeddingsWithData,
+    index: Index,
+    field_to_data: Vec<u32>,
+    params: EmbeddingIndexParams,
+}
+
+impl std::fmt::Debug for EmbeddingIndexWithDataInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Inner")
+            .field("data", &self.data)
+            .field("index", &"Index { ... }")
+            .field("field_to_data", &self.field_to_data)
+            .field("params", &self.params)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EmbeddingIndexWithData {
+    inner: Arc<EmbeddingIndexWithDataInner>,
+}
+
+impl EmbeddingIndexWithData {
+    #[inline]
+    fn filter_internal(&self, filter: impl Fn(u32) -> bool) -> impl Fn(u64) -> bool {
+        move |field_id: u64| {
+            let Some(data_id) = self.inner.field_to_data.get(field_id as usize).copied() else {
+                return false;
+            };
+            filter(data_id)
+        }
+    }
+
+    fn field_to_column(&self, field_id: u32) -> usize {
+        let field_to_data = &self.inner.field_to_data;
+
+        let mut field_id = field_id as usize;
+        let data_id = field_to_data[field_id] as usize;
+
+        let mut offset = 0;
+        while field_id > 0 && field_to_data[field_id - 1] == data_id as u32 {
+            field_id -= 1;
+            offset += 1;
+        }
+        offset
+    }
+
+    fn search_internal(
+        &self,
+        embedding: EmbeddingRef<'_>,
+        params: &EmbeddingSearchParams,
+        filter: Option<impl Fn(u32) -> bool>,
+    ) -> Result<Vec<Match>> {
+        let data = &self.inner.data;
+        let index = &self.inner.index;
+        let field_to_data = &self.inner.field_to_data;
+
+        let predicate = filter.map(|f| self.filter_internal(f));
+
+        let matches = EmbeddingIndex::search(
+            embedding,
+            index,
+            self.inner.params.metric,
+            self.inner.params.precision,
+            data,
+            params,
+            predicate,
+        )?;
+
+        // Sort by data_id, then by score descending, then by field_id
+        let mut matches: Vec<_> = matches
+            .into_iter()
+            .map(|(field_id, score)| {
+                let data_id = field_to_data[field_id as usize];
+                (data_id, field_id, score)
+            })
+            .sorted_by_key(|&(data_id, field_id, score)| {
+                (data_id, Reverse(OrderedFloat(score)), field_id)
+            })
+            .collect();
+
+        // Deduplicate by data_id (keeping the best score)
+        matches.dedup_by(|a, b| a.0 == b.0);
+
+        // Sort by score descending, then by data_id
+        matches.sort_by_key(|&(data_id, _field_id, score)| (Reverse(OrderedFloat(score)), data_id));
+
+        // Take top k
+        let matches: Vec<Match> = matches
+            .into_iter()
+            .map(|(data_id, field_id, score)| {
+                Match::WithField(data_id, self.field_to_column(field_id as u32), score)
+            })
+            .take(params.k)
+            .collect();
+
+        Ok(matches)
+    }
+}
+
+impl Search for EmbeddingIndexWithData {
+    type Data = EmbeddingsWithData;
+    type Query<'q> = EmbeddingRef<'q>;
+    type BuildParams = EmbeddingIndexParams;
+    type SearchParams = EmbeddingSearchParams;
+
+    fn build(data: &Self::Data, index_dir: &Path, params: &Self::BuildParams) -> Result<()> {
+        // Validate metric is compatible with precision
+        params.metric.validate_precision(params.precision)?;
+
+        create_dir_all(index_dir)?;
+
+        // Create usearch index
+        let num_dimensions = data.num_dimensions();
+
+        let options = IndexOptions {
+            dimensions: num_dimensions,
+            metric: params.metric.to_usearch_metric(),
+            quantization: params.precision.to_usearch_scalar_kind(),
+            connectivity: params.connectivity,
+            expansion_add: params.expansion_add,
+            expansion_search: params.expansion_search,
+            multi: false,
+        };
+
+        let index = Index::new(&options)?;
+
+        let total_fields = data.total_fields();
+        index.reserve_capacity_and_threads(total_fields as usize, num_cpus::get_physical())?;
+
+        let pb = progress_bar("Building text embedding index", Some(total_fields as u64))?;
+
+        let mut field_to_data_file =
+            BufWriter::new(File::create(index_dir.join("index.field-to-data"))?);
+        let mut field_id: u32 = 0;
+        for (id, embeddings) in data.embedding_items() {
+            for emb in embeddings {
+                if field_id == u32::MAX {
+                    return Err(anyhow!("too many fields, max {} supported", u32::MAX));
+                }
+
+                if params.precision == Precision::Binary {
+                    let binary_emb = binary_quantization(emb)?;
+                    index.add(field_id as u64, b1x8::from_u8s(&binary_emb))?;
+                } else {
+                    index.add(field_id as u64, emb)?;
+                }
+
+                field_id += 1;
+                field_to_data_file.write_all(&id.to_le_bytes())?;
+
+                pb.inc(1);
+            }
+        }
+
+        pb.finish_with_message("Text embedding index built");
+
+        // Save the index
+        let index_file = index_dir.join("index.usearch");
+        index.save(index_file.to_str().ok_or_else(|| anyhow!("Invalid path"))?)?;
+
+        // Save params as JSON
+        write_json(&index_dir.join("index.params"), params)?;
+
+        Ok(())
+    }
+
+    fn load(data: Self::Data, index_dir: &Path) -> Result<Self> {
+        // Load params from JSON
+        let params: EmbeddingIndexParams = load_json(&index_dir.join("index.params"))?;
+
+        // Load the index
+        let index_file = index_dir.join("index.usearch");
+
+        let index = Index::new(&IndexOptions {
+            dimensions: data.num_dimensions(),
+            metric: params.metric.to_usearch_metric(),
+            quantization: params.precision.to_usearch_scalar_kind(),
+            connectivity: params.connectivity,
+            expansion_add: params.expansion_add,
+            expansion_search: params.expansion_search,
+            multi: false,
+        })?;
+
+        index.view(index_file.to_str().ok_or_else(|| anyhow!("Invalid path"))?)?;
+
+        let field_to_data = load_u32_vec(&index_dir.join("index.field-to-data"))?;
+
+        Ok(Self {
+            inner: Arc::new(EmbeddingIndexWithDataInner {
+                data,
+                index,
+                field_to_data,
+                params,
+            }),
+        })
+    }
+
+    fn data(&self) -> &Self::Data {
+        &self.inner.data
+    }
+
+    fn index_type(&self) -> &'static str {
+        "text-embedding"
     }
 
     fn search(&self, query: Self::Query<'_>, params: &Self::SearchParams) -> Result<Vec<Match>> {
