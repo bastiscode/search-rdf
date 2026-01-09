@@ -12,7 +12,7 @@ use oxrdf::vocab::xsd;
 use oxrdf::{Literal, NamedNode, Term, Variable};
 use search_rdf::index::Search;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use sparesults::{
     QueryResultsFormat, QueryResultsParser, QueryResultsSerializer, QuerySolution,
     ReaderQueryResultsParserOutput,
@@ -377,7 +377,7 @@ pub struct QlProxyParams {
     #[serde(default = "default_rowvar")]
     rowvar: String,
     #[serde(flatten)]
-    params: SearchParams,
+    params: HashMap<String, Value>,
 }
 
 fn default_rowvar() -> String {
@@ -387,7 +387,7 @@ fn default_rowvar() -> String {
 pub async fn qlproxy(
     AxumPath(index_name): AxumPath<String>,
     State(state): State<AppState>,
-    AxumQuery(params): AxumQuery<QlProxyParams>,
+    AxumQuery(mut params): AxumQuery<QlProxyParams>,
     body: Bytes,
 ) -> Result<Response, AppError> {
     info!(
@@ -496,10 +496,23 @@ pub async fn qlproxy(
         Query::Text(params.query)
     };
 
+    // parse params
+    params.params.insert(
+        "type".to_string(),
+        Value::String(index.index_type().to_string()),
+    );
+
+    let search_params = SearchParams::deserialize(json!(params.params)).map_err(|e| {
+        AppError(
+            StatusCode::BAD_REQUEST,
+            anyhow!("Failed to parse search parameters: {}", e),
+        )
+    })?;
+
     // Always perform filtered search
     let start = Instant::now();
     let matches =
-        perform_search_with_filter(index, vec![query], params.params, model, filter).await?;
+        perform_search_with_filter(index, vec![query], search_params, model, filter).await?;
 
     info!("Search completed in {}ms", start.elapsed().as_millis());
 

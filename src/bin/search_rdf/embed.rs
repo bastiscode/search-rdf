@@ -18,7 +18,7 @@ use search_rdf::model::{EmbeddingModel, EmbeddingParams};
 use search_rdf::utils::progress_bar;
 
 use crate::search_rdf::config::Config;
-use crate::search_rdf::model::load_model;
+use crate::search_rdf::model::get_or_load_model_and_params;
 
 pub fn run(config_path: &Path, force: bool) -> Result<()> {
     let config = Config::load(config_path)?;
@@ -28,44 +28,17 @@ pub fn run(config_path: &Path, force: bool) -> Result<()> {
 
     info!("Building embeddings in {}", config_dir.display());
 
-    let Some(embed) = config.embeddings else {
+    let Some(embed) = &config.embeddings else {
         info!("No embedding configuration found.");
         return Ok(());
     };
 
-    let Some(mut model_configs) = config.models else {
-        info!("No models defined in configuration.");
-        return Ok(());
-    };
-
-    model_configs.retain(|model| {
-        embed
-            .iter()
-            .any(|embed_config| embed_config.model == model.name)
-    });
-
-    // Load models
+    // Store models
     let mut models = HashMap::new();
-    info!("Loading {} models...", model_configs.len());
-
-    for model_config in &model_configs {
-        let model = load_model(&model_config.model_type)?;
-        info!(
-            "[OK] {} (type: {}, dimensions: {}, max_input_len: {})",
-            model_config.name,
-            model.model_type(),
-            model.num_dimensions(),
-            model
-                .max_input_len()
-                .map(|len| len.to_string())
-                .unwrap_or_else(|| "unknown".to_string())
-        );
-        models.insert(model_config.name.clone(), (model, model_config.params));
-    }
 
     info!("Generating embeddings for {} datasets...", embed.len());
 
-    for embed_config in &embed {
+    for embed_config in embed {
         if config_dir.join(&embed_config.output).exists() && !force {
             info!(
                 "[SKIP] {} (output exists, use --force to rebuild)",
@@ -74,9 +47,8 @@ pub fn run(config_path: &Path, force: bool) -> Result<()> {
             continue;
         }
 
-        let (model, params) = models
-            .get(&embed_config.model)
-            .ok_or_else(|| anyhow!("Model not found: {}", embed_config.model))?;
+        let (model, params) =
+            get_or_load_model_and_params(&embed_config.model, &mut models, &config)?;
 
         info!("[BUILD] {}...", embed_config.name);
 

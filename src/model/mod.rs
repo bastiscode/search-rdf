@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod image;
 pub mod text;
+pub(crate) mod utils;
 
 #[derive(Debug, Clone)]
 pub enum EmbeddingModel {

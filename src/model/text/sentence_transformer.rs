@@ -8,7 +8,7 @@ use pyo3::{
 
 use crate::{
     data::embedding::Embedding,
-    model::{AsInput, Embed, EmbeddingParams},
+    model::{AsInput, Embed, EmbeddingParams, utils::ignore_system_signals},
 };
 
 #[derive(Debug)]
@@ -37,6 +37,7 @@ impl SentenceTransformer {
 
     pub fn load(name: &str, device: &str, batch_size: usize) -> Result<Self> {
         let model = Python::attach(|py| -> Result<Py<PyAny>> {
+            ignore_system_signals(py)?;
             let model_instance = Self::load_python_model(py, name, device)?;
             Ok(model_instance.into())
         })?;

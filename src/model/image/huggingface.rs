@@ -6,6 +6,7 @@ use numpy::ndarray::Array3;
 use pyo3::{prelude::*, types::PyDict};
 
 use crate::model::AsInput;
+use crate::model::utils::ignore_system_signals;
 use crate::{
     data::embedding::Embedding,
     model::{Embed, EmbeddingParams},
@@ -37,6 +38,7 @@ impl HuggingFaceImageModel {
 
     pub fn load(name: &str, device: &str, batch_size: usize) -> Result<Self> {
         let model = Python::attach(|py| -> Result<Py<PyAny>> {
+            ignore_system_signals(py)?;
             let model_instance = Self::load_python_model(py, name, device)?;
             Ok(model_instance.into())
         })?;

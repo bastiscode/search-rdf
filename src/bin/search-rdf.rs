@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use env_logger::TimestampPrecision;
 use log::{LevelFilter, info};
 
 #[derive(Parser)]
@@ -81,7 +82,7 @@ fn main() -> Result<()> {
 
     env_logger::Builder::from_default_env()
         .filter_level(log_level)
-        .format_timestamp(None)
+        .format_timestamp(Some(TimestampPrecision::Millis))
         .format_target(false)
         .init();
 

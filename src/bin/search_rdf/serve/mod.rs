@@ -14,8 +14,8 @@ use std::{collections::HashMap, path::Path};
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::search_rdf::config::Config;
-use crate::search_rdf::{index::load_index, model::load_model};
+use crate::search_rdf::index::load_index;
+use crate::search_rdf::{config::Config, model::load_model_and_params};
 
 use self::handlers::{health, list_indices};
 use self::search::search;
@@ -35,7 +35,6 @@ pub async fn run(config_path: &Path) -> Result<()> {
         return Ok(());
     };
 
-    info!("Loading indices and models...");
     let mut search_indices = HashMap::new();
     let mut models = HashMap::new();
     let mut index_to_model: HashMap<String, String> = HashMap::new();
@@ -54,30 +53,11 @@ pub async fn run(config_path: &Path) -> Result<()> {
         if let Some(model) = index_config.index_type.get_model()
             && !models.contains_key(model)
         {
-            info!("  - Requires model: {}", model);
+            info!("Index requires model: {}", model);
 
-            let model_config = config
-                .models
-                .as_ref()
-                .ok_or_else(|| anyhow!("No model configurations found"))?
-                .iter()
-                .find(|&m| m.name == model)
-                .ok_or_else(|| anyhow!("Model configuration not found for {}", model))?;
-
-            let model = load_model(&model_config.model_type)?;
-            info!(
-                "  [OK] {} (type: {}, dimensions: {}, max_input_len: {})",
-                name,
-                model.model_type(),
-                model.num_dimensions(),
-                model
-                    .max_input_len()
-                    .map(|len| len.to_string())
-                    .unwrap_or_else(|| "unknown".to_string())
-            );
-
-            models.insert(model_config.name.clone(), (model, model_config.params));
-            index_to_model.insert(name.to_string(), model_config.name.clone());
+            index_to_model.insert(name.to_string(), model.to_string());
+            let (emb_model, emb_params) = load_model_and_params(model, &config)?;
+            models.insert(model.to_string(), (emb_model, emb_params));
         }
 
         let search_index = load_index(config_dir, &index_config.index_type, &index_config.output)?;
