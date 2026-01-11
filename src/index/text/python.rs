@@ -48,4 +48,15 @@ impl KeywordIndex {
             self.inner.search(query, &params)
         }
     }
+
+    #[getter]
+    pub fn index_type(&self) -> &str {
+        self.inner.index_type()
+    }
+
+    pub fn data(&self) -> Data {
+        Data {
+            inner: self.inner.data().clone(),
+        }
+    }
 }

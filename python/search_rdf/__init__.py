@@ -1,13 +1,11 @@
 from search_rdf._internal import (
+    Data,
+    EmbeddingIndex,
     KeywordIndex,
-    TextData,
-    TextEmbeddingIndex,
-    TextEmbeddings,
 )
 
 __all__ = [
+    "Data",
+    "EmbeddingIndex",
     "KeywordIndex",
-    "TextData",
-    "TextEmbeddingIndex",
-    "TextEmbeddings",
 ]

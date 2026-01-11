@@ -279,7 +279,7 @@ impl EmbeddingsWithData {
 
         if data.total_fields() as usize != tensors.len() {
             return Err(anyhow!(
-                "Number of embeddings ({}) does not match number of text fields ({})",
+                "Number of embeddings ({}) does not match number of data fields ({})",
                 tensors.len(),
                 data.total_fields()
             ));

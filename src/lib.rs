@@ -7,9 +7,8 @@ use pyo3::prelude::*;
 
 #[pymodule]
 fn _internal(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // Add data classes
+    // Add data class
     m.add_class::<data::python::Data>()?;
-    m.add_class::<data::python::Embeddings>()?;
 
     // Add index classes
     m.add_class::<index::text::python::KeywordIndex>()?;

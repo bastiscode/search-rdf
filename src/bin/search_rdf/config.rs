@@ -23,7 +23,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub struct DataConfig {
     pub name: String,
     pub output: PathBuf,
@@ -31,9 +31,8 @@ pub struct DataConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "kebab-case")]
 pub enum DataSource {
-    #[serde(rename = "sparql-query")]
     SparqlQuery {
         endpoint: String,
         query: Option<String>,
@@ -62,13 +61,12 @@ pub struct ModelConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ModelType {
     Vllm {
         endpoint: String,
         model_name: String,
     },
-    #[serde(rename = "sentence-transformer")]
     SentenceTransformer {
         model_name: String,
         #[serde(default = "default_device")]
@@ -76,7 +74,6 @@ pub enum ModelType {
         #[serde(default = "default_model_batch_size")]
         batch_size: usize,
     },
-    #[serde(rename = "huggingface-image")]
     HuggingFaceImage {
         model_name: String,
         #[serde(default = "default_device")]
@@ -117,16 +114,14 @@ pub struct IndexConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "kebab-case")]
 pub enum IndexType {
     Keyword {
         data: PathBuf,
     },
-    #[serde(rename = "full-text")]
     FullText {
         data: PathBuf,
     },
-    #[serde(rename = "embedding-with-data")]
     EmbeddingWithData {
         data: PathBuf,
         embedding_data: PathBuf,

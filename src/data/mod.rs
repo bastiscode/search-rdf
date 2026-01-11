@@ -16,7 +16,7 @@ use log::info;
 use memmap2::Mmap;
 
 use crate::data::{
-    item::{FieldRef, Item, ItemRef},
+    item::{FieldRef, FieldTag, Item, ItemRef},
     map::{OrderedDataMap, TrieMap},
 };
 
@@ -53,6 +53,12 @@ pub trait DataSource: Send + Sync + Clone {
 
     /// Get a specific field value for a data point
     fn field(&self, id: u32, field: usize) -> Option<Self::Field<'_>>;
+
+    /// Get the main field for a specific data point
+    /// By default, this returns the first field (index 0)
+    fn main_field(&self, id: u32) -> Option<Self::Field<'_>> {
+        self.field(id, 0)
+    }
 
     /// Get all searchable fields as a collection for a data point
     fn fields(&self, id: u32) -> Option<impl Iterator<Item = Self::Field<'_>>>;
@@ -165,14 +171,13 @@ impl DataSource for Data {
     }
 
     fn field(&self, id: u32, field: usize) -> Option<Self::Field<'_>> {
-        if let Some(count) = self.inner.data_map.count(id as usize)
-            && field >= count as usize
-        {
-            return None;
-        }
         let range = self.inner.data_map.range(id as usize)?;
         let item = ItemRef::decode(&self.inner.data[range]).ok()?;
         item.field(field)
+    }
+
+    fn main_field(&self, id: u32) -> Option<Self::Field<'_>> {
+        self.fields(id)?.find(|f| f.has_tag(FieldTag::Main))
     }
 
     fn fields(&self, id: u32) -> Option<impl Iterator<Item = Self::Field<'_>>> {

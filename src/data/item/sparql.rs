@@ -54,7 +54,9 @@ where
 {
     identifier: Option<String>,
     fields: Vec<StringField>,
+    field_type_column: Option<usize>,
     default_field_type: FieldType,
+    field_tag_column: Option<usize>,
     inner: I,
 }
 
@@ -62,11 +64,18 @@ impl<I> SPARQLResultIterator<I>
 where
     I: IntoIterator<Item = Result<QuerySolution, QueryResultsParseError>>,
 {
-    pub fn new(inner: I, default_field_type: FieldType) -> Self {
+    pub fn new(
+        inner: I,
+        field_type_column: Option<usize>,
+        default_field_type: FieldType,
+        field_tag_column: Option<usize>,
+    ) -> Self {
         Self {
             identifier: None,
             fields: Vec::new(),
+            field_type_column,
             default_field_type,
+            field_tag_column,
             inner,
         }
     }
@@ -74,7 +83,9 @@ where
 
 fn parse_solution(
     solution: &QuerySolution,
+    field_type_column: Option<usize>,
     default_field_type: FieldType,
+    field_tag_column: Option<usize>,
 ) -> Result<(String, StringField)> {
     if solution.len() != 2 && solution.len() != 3 {
         return Err(anyhow!(
@@ -113,19 +124,43 @@ fn parse_solution(
         }
     };
 
-    let field_type = if let Some(Some(third)) = values.get(2) {
-        let Term::Literal(type_literal) = third else {
+    let field_type =
+        if let Some(Some(field_type)) = field_type_column.and_then(|col| values.get(col)) {
+            let Term::Literal(type_literal) = field_type else {
+                return Err(anyhow!(
+                    "Expected third variable (type) to be a string literal, found {:?}",
+                    field_type
+                ));
+            };
+            serde_plain::from_str(type_literal.value())?
+        } else {
+            default_field_type
+        };
+
+    let tags = if let Some(Some(field_tag)) = field_tag_column.and_then(|col| values.get(col)) {
+        let Term::Literal(tag_literal) = field_tag else {
             return Err(anyhow!(
-                "Expected third variable (type) to be a string literal, found {:?}",
-                third
+                "Expected fourth variable (tag) to be a string literal, found {:?}",
+                field_tag
             ));
         };
-        serde_plain::from_str(type_literal.value())?
+        tag_literal
+            .value()
+            .split(',')
+            .map(|s| serde_plain::from_str(s.trim()))
+            .collect::<Result<_, _>>()?
     } else {
-        default_field_type
+        Vec::new()
     };
 
-    Ok((identifier, StringField { value, field_type }))
+    Ok((
+        identifier,
+        StringField {
+            value,
+            field_type,
+            tags,
+        },
+    ))
 }
 
 impl<I> Iterator for SPARQLResultIterator<I>
@@ -144,7 +179,12 @@ where
                 continue;
             };
 
-            let (identifier, field) = match parse_solution(&solution, self.default_field_type) {
+            let (identifier, field) = match parse_solution(
+                &solution,
+                self.field_type_column,
+                self.default_field_type,
+                self.field_tag_column,
+            ) {
                 Ok(sol) => sol,
                 Err(e) => return Some(Err(anyhow!("Failed to parse SPARQL solution: {}", e))),
             };
@@ -183,7 +223,35 @@ pub fn stream_items_from_sparql_result<R: Read>(
         return Err(anyhow!("Expected SPARQL result in {:?} format", format));
     };
 
-    Ok(SPARQLResultIterator::new(solutions, default_field_type))
+    let variables = solutions.variables();
+    if !(2..=4).contains(&variables.len()) {
+        return Err(anyhow!(
+            "Expected 2 to 4 variables in SPARQL result, found {}: {:?}",
+            variables.len(),
+            variables
+        ));
+    }
+    if variables[0].as_str() != "id" {
+        return Err(anyhow!(
+            "Expected first variable to be 'id', found '{}'",
+            variables[0].as_str()
+        ));
+    }
+    if variables[1].as_str() != "value" {
+        return Err(anyhow!(
+            "Expected second variable to be 'value', found '{}'",
+            variables[1].as_str()
+        ));
+    }
+    let field_type_column = variables.iter().position(|v| v.as_str() == "type");
+    let field_tag_column = variables.iter().position(|v| v.as_str() == "tags");
+
+    Ok(SPARQLResultIterator::new(
+        solutions,
+        field_type_column,
+        default_field_type,
+        field_tag_column,
+    ))
 }
 
 pub fn stream_items_from_sparql_result_file(

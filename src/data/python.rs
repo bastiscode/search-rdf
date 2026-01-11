@@ -1,7 +1,12 @@
 use std::convert::Infallible;
 
-use crate::data::item::sparql::SPARQLResultFormat;
-use crate::data::{Data as RustData, embedding::EmbeddingsWithData as RustEmbeddingsWithData};
+use crate::data::Data as RustData;
+use crate::data::item::FieldType;
+use crate::data::item::jsonl::stream_items_from_jsonl_file;
+use crate::data::item::sparql::{
+    SPARQLResultFormat, guess_sparql_result_format_from_extension,
+    stream_items_from_sparql_result_file,
+};
 use crate::data::{DataSource, Precision};
 use anyhow::{Result, anyhow};
 use pyo3::prelude::*;
@@ -52,8 +57,54 @@ impl<'a, 'py> FromPyObject<'a, 'py> for SPARQLResultFormat {
     }
 }
 
+impl<'a, 'py> FromPyObject<'a, 'py> for FieldType {
+    type Error = anyhow::Error;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        let s: &str = obj.extract()?;
+        let field_type = match s.to_lowercase().as_str() {
+            "text" => FieldType::Text,
+            "image" => FieldType::Image,
+            "image-inline" => FieldType::ImageInline,
+            _ => {
+                return Err(anyhow!(
+                    "Invalid FieldType: {}. Expected one of: text, image, image-inline",
+                    s
+                ));
+            }
+        };
+        Ok(field_type)
+    }
+}
+
 #[pymethods]
 impl Data {
+    #[staticmethod]
+    pub fn build_from_jsonl(file_path: &str, data_dir: &str) -> Result<()> {
+        RustData::build(
+            stream_items_from_jsonl_file(file_path.as_ref())?,
+            data_dir.as_ref(),
+        )
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (file_path, data_dir, format = None, default_field_type = FieldType::Text))]
+    pub fn build_from_sparql_result(
+        file_path: &str,
+        data_dir: &str,
+        format: Option<SPARQLResultFormat>,
+        default_field_type: FieldType,
+    ) -> Result<()> {
+        let format = match format {
+            Some(f) => f,
+            None => guess_sparql_result_format_from_extension(file_path.as_ref())?,
+        };
+        RustData::build(
+            stream_items_from_sparql_result_file(file_path.as_ref(), format, default_field_type)?,
+            data_dir.as_ref(),
+        )
+    }
+
     #[staticmethod]
     pub fn load(data_dir: &str) -> Result<Self> {
         let inner = RustData::load(data_dir.as_ref())?;
@@ -110,44 +161,14 @@ impl DataIterator {
         slf
     }
 
-    fn __next__(&mut self) -> Option<Vec<&str>> {
+    fn __next__(&mut self) -> Option<(&str, Vec<&str>)> {
+        let identifier = self.data.identifier(self.index)?;
         let fields = self
             .data
             .fields(self.index)?
             .map(|field| field.as_str())
             .collect();
         self.index += 1;
-        Some(fields)
-    }
-}
-
-#[derive(Clone)]
-#[pyclass]
-pub struct Embeddings {
-    pub inner: RustEmbeddingsWithData,
-}
-
-#[pymethods]
-impl Embeddings {
-    #[staticmethod]
-    pub fn load(data: Data, embeddings_file: &str) -> Result<Self> {
-        let inner = RustEmbeddingsWithData::load(data.inner, embeddings_file.as_ref())?;
-        Ok(Self { inner })
-    }
-
-    pub fn __len__(&self) -> usize {
-        self.inner.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-
-    pub fn num_dimensions(&self) -> usize {
-        self.inner.num_dimensions()
-    }
-
-    pub fn model(&self) -> &str {
-        self.inner.model()
+        Some((identifier, fields))
     }
 }

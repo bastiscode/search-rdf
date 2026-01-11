@@ -1,11 +1,9 @@
 use std::collections::HashSet;
 
-use crate::data::Precision;
 use crate::data::embedding::Embedding;
-use crate::data::python::Embeddings;
-use crate::index::embedding::{
-    EmbeddingIndexWithData as RustEmbeddingIndexWithData, EmbeddingSearchParams,
-};
+use crate::data::python::Data;
+use crate::data::{EmbeddingsWithData, Precision};
+use crate::index::embedding::{EmbeddingIndexWithData, EmbeddingSearchParams};
 use crate::index::{EmbeddingIndexParams, Match, Metric, Search};
 
 use anyhow::{Result, anyhow};
@@ -52,15 +50,16 @@ impl<'a, 'py> FromPyObject<'a, 'py> for Precision {
 }
 #[pyclass]
 pub struct EmbeddingIndex {
-    inner: RustEmbeddingIndexWithData,
+    inner: EmbeddingIndexWithData,
 }
 
 #[pymethods]
 impl EmbeddingIndex {
     #[staticmethod]
-    #[pyo3(signature = (data, index_dir, metric=None, precision=None))]
+    #[pyo3(signature = (data, embeddings_path, index_dir, metric=None, precision=None))]
     pub fn build(
-        data: &Embeddings,
+        data: Data,
+        embeddings_path: &str,
         index_dir: &str,
         metric: Option<Metric>,
         precision: Option<Precision>,
@@ -73,16 +72,19 @@ impl EmbeddingIndex {
         if let Some(metric) = metric {
             params = params.with_metric(metric);
         };
-        RustEmbeddingIndexWithData::build(&data.inner, index_dir.as_ref(), &params)
+
+        let data = EmbeddingsWithData::load(data.inner, embeddings_path.as_ref())?;
+        EmbeddingIndexWithData::build(&data, index_dir.as_ref(), &params)
     }
 
     #[staticmethod]
-    pub fn load(data: Embeddings, index_dir: &str) -> Result<Self> {
-        let inner = RustEmbeddingIndexWithData::load(data.inner, index_dir.as_ref())?;
+    pub fn load(data: Data, embeddings_path: &str, index_dir: &str) -> Result<Self> {
+        let data = EmbeddingsWithData::load(data.inner, embeddings_path.as_ref())?;
+        let inner = EmbeddingIndexWithData::load(data, index_dir.as_ref())?;
         Ok(Self { inner })
     }
 
-    #[pyo3(signature = (query, k=100, exact=false, min_score=None, rerank=None, allow_ids=None))]
+    #[pyo3(signature = (query, k=10, exact=false, min_score=None, rerank=None, allow_ids=None))]
     pub fn search(
         &self,
         query: Embedding,
@@ -105,5 +107,26 @@ impl EmbeddingIndex {
         } else {
             self.inner.search(&query, &params)
         }
+    }
+
+    #[getter]
+    pub fn index_type(&self) -> &str {
+        self.inner.index_type()
+    }
+
+    pub fn data(&self) -> Data {
+        Data {
+            inner: self.inner.data().data().clone(),
+        }
+    }
+
+    #[getter]
+    pub fn num_dimensions(&self) -> usize {
+        self.inner.data().num_dimensions()
+    }
+
+    #[getter]
+    pub fn model(&self) -> &str {
+        self.inner.data().model()
     }
 }

@@ -3,76 +3,83 @@
 from typing import Iterator, final
 
 @final
-class TextData:
-    """Text data source backed by a TSV file."""
+class Data:
+    """Data source built from JSONL or SPARQL result file."""
 
     @staticmethod
-    def load(data_dir: str) -> TextData:
+    def build_from_jsonl(file_path: str, data_dir: str) -> None:
         """
-        Load text data from a directory.
+        Build data from a JSONL file.
 
         Args:
-            data_dir: Directory containing the text data
+            file_path: Path to the JSONL file
+            data_dir: Output directory for the data
+        """
+        ...
+
+    @staticmethod
+    def build_from_sparql_result(
+        file_path: str,
+        data_dir: str,
+        format: str | None = None,
+        default_field_type: str = "text",
+    ) -> None:
+        """
+        Build data from a SPARQL result file.
+
+        Args:
+            file_path: Path to the SPARQL result file
+            data_dir: Output directory for the data
+            format: Format of the SPARQL result file ("json", "xml", or "tsv", or None for auto-detect)
+            default_field_type: Default field type for literals ("text", "image", or "image-inline")
+        """
+        ...
+
+    @staticmethod
+    def load(data_dir: str) -> Data:
+        """
+        Load data from a directory.
+
+        Args:
+            data_dir: Directory containing the data
 
         Returns:
-            Loaded TextData instance
+            Loaded Data instance
         """
         ...
 
     def __len__(self) -> int: ...
     def is_empty(self) -> bool: ...
-    def __iter__(self) -> Iterator[list[str]]: ...
+    def __iter__(self) -> Iterator[tuple[str, list[str]]]: ...
     def num_fields(self, id: int) -> int | None: ...
     def field(self, id: int, field: int) -> str | None: ...
     def fields(self, id: int) -> list[str] | None: ...
+    def main_field(self, id: int) -> str | None: ...
     def identifier(self, id: int) -> str | None: ...
     def id_from_identifier(self, identifier: str) -> int | None: ...
 
 @final
-class TextEmbeddings:
-    """Text embeddings with associated text data."""
-
-    @staticmethod
-    def load(data: TextData, embeddings_file: str) -> TextEmbeddings:
-        """
-        Load text embeddings from a directory.
-
-        Args:
-            data: Text data associated with the embeddings
-            embeddings_file: File containing the embeddings
-
-        Returns:
-            Loaded TextEmbeddings instance
-        """
-        ...
-
-    def __len__(self) -> int: ...
-    def is_empty(self) -> bool: ...
-    def num_dimensions(self) -> int: ...
-    def model(self) -> str: ...
-
-@final
 class KeywordIndex:
-    """Keyword search index for text data."""
+    """Keyword search index for data."""
 
     @staticmethod
-    def build(data: TextData, index_dir: str) -> None:
+    def build(data: Data, index_dir: str) -> None:
         """
         Build a keyword search index.
 
         Args:
-            data: TextData to index
+            data: Data to index
             index_dir: Output directory for the index
         """
         ...
 
     @staticmethod
-    def load(data: TextData, index_dir: str) -> KeywordIndex:
+    def load(data: Data, index_dir: str) -> KeywordIndex:
         """
         Load a keyword search index.
 
         Args:
-            data: TextData associated with the index
+            data: Data associated with the index
             index_dir: Directory containing the index
 
         Returns:
@@ -103,13 +110,33 @@ class KeywordIndex:
         """
         ...
 
+    def data(self) -> Data:
+        """
+        Get the data associated with the index.
+
+        Returns:
+            Data instance
+        """
+        ...
+
+    @property
+    def index_type(self) -> str:
+        """
+        Get the type of the index.
+
+        Returns:
+            Index type as a string
+        """
+        ...
+
 @final
-class TextEmbeddingIndex:
-    """Embedding-based search index for text data."""
+class EmbeddingIndex:
+    """Embedding-based search index for data."""
 
     @staticmethod
     def build(
-        data: TextEmbeddings,
+        data: Data,
+        embeddings_path: str,
         index_dir: str,
         metric: str | None = None,
         precision: str | None = None,
@@ -118,7 +145,8 @@ class TextEmbeddingIndex:
         Build an embedding search index.
 
         Args:
-            data: TextEmbeddings to index
+            data: Data to index
+            embeddings_path: Path to the embeddings for the data
             index_dir: Output directory for the index
             metric: Distance metric ("cosine", "inner_product", "ip", "l2", "hamming")
             precision: Precision ("float32", "binary", "float16", "bfloat16", "int8")
@@ -126,23 +154,24 @@ class TextEmbeddingIndex:
         ...
 
     @staticmethod
-    def load(data: TextEmbeddings, index_dir: str) -> TextEmbeddingIndex:
+    def load(data: Data, embeddings_path: str, index_dir: str) -> EmbeddingIndex:
         """
         Load an embedding search index.
 
         Args:
-            data: TextEmbeddings associated with the index
+            data: Data associated with the index
+            embeddings_path: Path to the embeddings for the data
             index_dir: Directory containing the index
 
         Returns:
-            Loaded TextEmbeddingIndex instance
+            Loaded EmbeddingIndex instance
         """
         ...
 
     def search(
         self,
-        embedding: list[float] | bytes,
-        k: int = 100,
+        embedding: list[float],
+        k: int = 10,
         exact: bool = False,
         min_score: float | None = None,
         rerank: float | None = None,
@@ -164,9 +193,47 @@ class TextEmbeddingIndex:
         """
         ...
 
+    @property
+    def index_type(self) -> str:
+        """
+        Get the type of the index.
+
+        Returns:
+            Index type as a string
+        """
+        ...
+
+    @property
+    def model(self) -> str:
+        """
+        Get the model used for embeddings.
+
+        Returns:
+            Model name as a string
+        """
+        ...
+
+    @property
+    def num_dimensions(self) -> int:
+        """
+        Get the number of dimensions in the embeddings.
+
+        Returns:
+            Number of dimensions as an integer
+        """
+        ...
+
+    def data(self) -> Data:
+        """
+        Get the data associated with the index.
+
+        Returns:
+            Data instance
+        """
+        ...
+
 __all__ = [
+    "Data",
+    "EmbeddingIndex",
     "KeywordIndex",
-    "TextData",
-    "TextEmbeddingIndex",
-    "TextEmbeddings",
 ]

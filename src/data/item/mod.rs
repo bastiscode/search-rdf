@@ -30,23 +30,95 @@ pub struct StringField {
     #[serde(default, rename = "type")]
     pub field_type: FieldType,
     pub value: String,
+    #[serde(default)]
+    pub tags: Vec<FieldTag>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Field {
+#[derive(Clone, Debug)]
+pub struct Field {
+    data: FieldData,
+    tags: Vec<FieldTag>,
+}
+
+impl Field {
+    pub fn type_and_tags(&self) -> u8 {
+        let mut type_and_tag = self.data.to_type().to_bit();
+        for tag in &self.tags {
+            // set tag bits
+            type_and_tag |= tag.to_bit();
+        }
+        type_and_tag
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum FieldData {
     Text(String),
     ImageInline { url: String, data: Vec<u8> },
     Image(String),
 }
 
+impl FieldData {
+    pub fn to_type(&self) -> FieldType {
+        match self {
+            FieldData::Text(_) => FieldType::Text,
+            FieldData::Image(_) => FieldType::Image,
+            FieldData::ImageInline { .. } => FieldType::ImageInline,
+        }
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum FieldType {
     #[default]
     Text,
     Image,
-    #[serde(rename = "image-inline")]
     ImageInline,
+}
+
+impl FieldType {
+    pub fn to_bit(&self) -> u8 {
+        let num = match self {
+            FieldType::Text => 0,
+            FieldType::Image => 1,
+            FieldType::ImageInline => 2,
+        };
+        num << 4
+    }
+
+    pub fn from_type_and_tags(byte: u8) -> Option<FieldType> {
+        match byte >> 4 {
+            0 => Some(FieldType::Text),
+            1 => Some(FieldType::Image),
+            2 => Some(FieldType::ImageInline),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FieldTag {
+    // use this to tag fields when indexing
+    // one bit per tag, currently we use a u8
+    // to store field type and tags. reserve
+    // 4 bits for tags and 4 bits for field types.
+    // so we can have up to 4 tags and 16 field types.
+    Main,
+}
+
+impl FieldTag {
+    pub fn to_bit(&self) -> u8 {
+        match self {
+            FieldTag::Main => 0b0000_0001,
+        }
+    }
+
+    pub fn is_set(&self, byte: u8) -> bool {
+        let bit = self.to_bit();
+        (byte & bit) != 0
+    }
 }
 
 impl Item {
@@ -60,7 +132,7 @@ impl Item {
 
         let fields = fields
             .into_iter()
-            .map(|field| field.field_type.create_field(field.value))
+            .map(|field| field.field_type.create_field(field.value, field.tags))
             .collect::<Result<_>>()?;
 
         Ok(Item { identifier, fields })
@@ -88,19 +160,18 @@ impl Item {
 
 impl Field {
     fn encode_into(&self, bytes: &mut Vec<u8>) {
-        match self {
-            Field::Text(text) => {
-                bytes.push(0u8);
+        bytes.push(self.type_and_tags());
+
+        match &self.data {
+            FieldData::Text(text) => {
                 encode_string(bytes, text);
             }
-            Field::ImageInline { url, data } => {
-                bytes.push(1u8);
+            FieldData::ImageInline { url, data } => {
                 encode_string(bytes, url);
                 bytes.extend_from_slice(&(data.len() as u64).to_le_bytes());
                 bytes.extend_from_slice(data);
             }
-            Field::Image(url) => {
-                bytes.push(2u8);
+            FieldData::Image(url) => {
                 encode_string(bytes, url);
             }
         }
@@ -108,15 +179,17 @@ impl Field {
 }
 
 impl FieldType {
-    pub fn create_field(&self, value: String) -> Result<Field> {
-        match self {
-            FieldType::Text => Ok(Field::Text(value)),
-            FieldType::Image => Ok(Field::Image(value)),
+    pub fn create_field(&self, value: String, tags: Vec<FieldTag>) -> Result<Field> {
+        let data = match self {
+            FieldType::Text => FieldData::Text(value),
+            FieldType::Image => FieldData::Image(value),
             FieldType::ImageInline => {
                 let data = load_bytes_from_url(&value)?;
-                Ok(Field::ImageInline { url: value, data })
+                FieldData::ImageInline { url: value, data }
             }
-        }
+        };
+
+        Ok(Field { data, tags })
     }
 }
 
@@ -184,53 +257,69 @@ impl<'a> ItemRef<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum FieldRef<'a> {
+pub struct FieldRef<'a> {
+    data: FieldRefData<'a>,
+    type_and_tags: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FieldRefData<'a> {
     Text(&'a str),
     ImageInline { url: &'a str, data: &'a [u8] },
     Image(&'a str),
 }
 
+impl FieldRefData<'_> {
+    pub fn to_type(&self) -> FieldType {
+        match self {
+            FieldRefData::Text(_) => FieldType::Text,
+            FieldRefData::ImageInline { .. } => FieldType::ImageInline,
+            FieldRefData::Image(_) => FieldType::Image,
+        }
+    }
+}
+
 impl<'a> FieldRef<'a> {
     pub fn as_str(&self) -> &'a str {
-        match self {
-            FieldRef::Text(s) => s,
-            FieldRef::ImageInline { url, .. } => url,
-            FieldRef::Image(url) => url,
+        match self.data {
+            FieldRefData::Text(s) => s,
+            FieldRefData::ImageInline { url, .. } => url,
+            FieldRefData::Image(url) => url,
         }
     }
 
     pub fn get_data(&self) -> Option<&'a [u8]> {
-        match self {
-            FieldRef::ImageInline { data, .. } => Some(data),
+        match self.data {
+            FieldRefData::ImageInline { data, .. } => Some(data),
             _ => None,
         }
     }
 
     pub fn field_type(&self) -> FieldType {
-        match self {
-            FieldRef::Text(_) => FieldType::Text,
-            FieldRef::ImageInline { .. } => FieldType::ImageInline,
-            FieldRef::Image(_) => FieldType::Image,
-        }
+        self.data.to_type()
     }
 
     pub fn is_text(&self) -> bool {
-        matches!(self, FieldRef::Text(_))
+        matches!(self.field_type(), FieldType::Text)
     }
 
     pub fn is_image(&self) -> bool {
-        matches!(self, FieldRef::ImageInline { .. } | FieldRef::Image(_))
+        matches!(self.field_type(), FieldType::Image | FieldType::ImageInline)
     }
 
     pub fn is_image_inline(&self) -> bool {
-        matches!(self, FieldRef::ImageInline { .. })
+        matches!(self.field_type(), FieldType::ImageInline)
+    }
+
+    pub fn has_tag(&self, tag: FieldTag) -> bool {
+        tag.is_set(self.type_and_tags)
     }
 
     pub fn load_data(&self) -> Result<Vec<u8>> {
-        match self {
-            FieldRef::ImageInline { data, .. } => Ok(data.to_vec()),
-            FieldRef::Image(url) => load_bytes_from_url(url),
-            FieldRef::Text(_) => Err(anyhow!("No data to load for text field")),
+        match self.data {
+            FieldRefData::ImageInline { data, .. } => Ok(data.to_vec()),
+            FieldRefData::Image(url) => load_bytes_from_url(url),
+            FieldRefData::Text(_) => Err(anyhow!("No data to load for text field")),
         }
     }
 }
@@ -249,16 +338,17 @@ impl<'a> Iterator for FieldIter<'a> {
             return None;
         }
 
-        let field_type = self.data[self.offset];
+        let type_and_tags = self.data[self.offset];
         self.offset += 1;
+        let field_type = FieldType::from_type_and_tags(type_and_tags)?;
 
-        let field = match field_type {
-            0 => {
+        let data = match field_type {
+            FieldType::Text => {
                 let (text, len) = decode_str(self.data, self.offset);
                 self.offset += len;
-                FieldRef::Text(text)
+                FieldRefData::Text(text)
             }
-            1 => {
+            FieldType::ImageInline => {
                 let (url, len) = decode_str(self.data, self.offset);
                 self.offset += len;
 
@@ -272,18 +362,20 @@ impl<'a> Iterator for FieldIter<'a> {
                 let data = &self.data[self.offset..self.offset + data_len];
                 self.offset += data_len;
 
-                FieldRef::ImageInline { url, data }
+                FieldRefData::ImageInline { url, data }
             }
-            2 => {
+            FieldType::Image => {
                 let (url, len) = decode_str(self.data, self.offset);
                 self.offset += len;
-                FieldRef::Image(url)
+                FieldRefData::Image(url)
             }
-            _ => panic!("Unknown field type: {}", field_type),
         };
 
         self.remaining -= 1;
-        Some(field)
+        Some(FieldRef {
+            data,
+            type_and_tags,
+        })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
