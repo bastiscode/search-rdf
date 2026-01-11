@@ -33,6 +33,7 @@ fn read_tsv_items(tsv_file: &Path) -> Result<Vec<Item>> {
                 .map(|s| StringField {
                     field_type: FieldType::Text,
                     value: s.to_string(),
+                    tags: vec![],
                 })
                 .collect();
             let item = Item::from_string_fields(identifier.to_string(), fields)?;

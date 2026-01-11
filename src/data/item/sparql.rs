@@ -294,16 +294,16 @@ mod tests {
     #[test]
     fn test_stream_single_identifier_multiple_fields() {
         let sparql_json = r#"{
-            "head": {"vars": ["s", "label"]},
+            "head": {"vars": ["id", "value"]},
             "results": {
                 "bindings": [
                     {
-                        "s": {"type": "uri", "value": "http://example.org/Q1"},
-                        "label": {"type": "literal", "value": "Universe"}
+                        "id": {"type": "uri", "value": "http://example.org/Q1"},
+                        "value": {"type": "literal", "value": "Universe"}
                     },
                     {
-                        "s": {"type": "uri", "value": "http://example.org/Q1"},
-                        "label": {"type": "literal", "value": "Cosmos"}
+                        "id": {"type": "uri", "value": "http://example.org/Q1"},
+                        "value": {"type": "literal", "value": "Cosmos"}
                     }
                 ]
             }
@@ -319,31 +319,31 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
         assert_eq!(items[0].num_fields(), 2);
-        assert_eq!(items[0].fields[0], Field::Text("Universe".to_string()));
-        assert_eq!(items[0].fields[1], Field::Text("Cosmos".to_string()));
+        assert_eq!(items[0].fields[0], Field::text("Universe"));
+        assert_eq!(items[0].fields[1], Field::text("Cosmos"));
     }
 
     #[test]
     fn test_stream_multiple_identifiers() {
         let sparql_json = r#"{
-            "head": {"vars": ["s", "label"]},
+            "head": {"vars": ["id", "value"]},
             "results": {
                 "bindings": [
                     {
-                        "s": {"type": "uri", "value": "http://example.org/Q1"},
-                        "label": {"type": "literal", "value": "First"}
+                        "id": {"type": "uri", "value": "http://example.org/Q1"},
+                        "value": {"type": "literal", "value": "First"}
                     },
                     {
-                        "s": {"type": "uri", "value": "http://example.org/Q2"},
-                        "label": {"type": "literal", "value": "Second"}
+                        "id": {"type": "uri", "value": "http://example.org/Q2"},
+                        "value": {"type": "literal", "value": "Second"}
                     },
                     {
-                        "s": {"type": "uri", "value": "http://example.org/Q2"},
-                        "label": {"type": "literal", "value": "Another"}
+                        "id": {"type": "uri", "value": "http://example.org/Q2"},
+                        "value": {"type": "literal", "value": "Another"}
                     },
                     {
-                        "s": {"type": "uri", "value": "http://example.org/Q3"},
-                        "label": {"type": "literal", "value": "Third"}
+                        "id": {"type": "uri", "value": "http://example.org/Q3"},
+                        "value": {"type": "literal", "value": "Third"}
                     }
                 ]
             }
@@ -359,20 +359,20 @@ mod tests {
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
         assert_eq!(items[0].num_fields(), 1);
-        assert_eq!(items[0].fields[0], Field::Text("First".to_string()));
+        assert_eq!(items[0].fields[0], Field::text("First"));
         assert_eq!(items[1].identifier, "http://example.org/Q2");
         assert_eq!(items[1].num_fields(), 2);
-        assert_eq!(items[1].fields[0], Field::Text("Second".to_string()));
-        assert_eq!(items[1].fields[1], Field::Text("Another".to_string()));
+        assert_eq!(items[1].fields[0], Field::text("Second"));
+        assert_eq!(items[1].fields[1], Field::text("Another"));
         assert_eq!(items[2].identifier, "http://example.org/Q3");
         assert_eq!(items[2].num_fields(), 1);
-        assert_eq!(items[2].fields[0], Field::Text("Third".to_string()));
+        assert_eq!(items[2].fields[0], Field::text("Third"));
     }
 
     #[test]
     fn test_stream_empty_bindings() {
         let sparql_json = r#"{
-            "head": {"vars": ["s", "label"]},
+            "head": {"vars": ["id", "value"]},
             "results": {
                 "bindings": []
             }
@@ -391,43 +391,39 @@ mod tests {
     #[test]
     fn test_invalid_binding_wrong_number_of_vars() {
         let sparql_json = r#"{
-            "head": {"vars": ["s", "label", "extra", "extra2"]},
+            "head": {"vars": ["id", "value", "extra", "extra2", "extra3"]},
             "results": {
                 "bindings": [
                     {
-                        "s": {"type": "uri", "value": "http://example.org/Q1"},
-                        "label": {"type": "literal", "value": "First"},
+                        "id": {"type": "uri", "value": "http://example.org/Q1"},
+                        "value": {"type": "literal", "value": "First"},
                         "extra": {"type": "literal", "value": "Extra"},
-                        "extra2": {"type": "literal", "value": "Extra2"}
+                        "extra2": {"type": "literal", "value": "Extra2"},
+                        "extra3": {"type": "literal", "value": "Extra3"}
                     }
                 ]
             }
         }"#;
 
         let cursor = Cursor::new(sparql_json);
-        let result: Result<Vec<_>> =
-            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON, FieldType::Text)
-                .expect("Failed to create iterator")
-                .collect();
+        let result =
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON, FieldType::Text);
 
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Expected 2 or 3 variables")
-        );
+        match result {
+            Err(e) => assert!(e.to_string().contains("Expected 2 to 4 variables")),
+            Ok(_) => panic!("Expected error but got Ok"),
+        }
     }
 
     #[test]
     fn test_invalid_binding_wrong_type() {
         let sparql_json = r#"{
-            "head": {"vars": ["s", "label"]},
+            "head": {"vars": ["id", "value"]},
             "results": {
                 "bindings": [
                     {
-                        "s": {"type": "literal", "value": "NotAURI"},
-                        "label": {"type": "literal", "value": "Field"}
+                        "id": {"type": "literal", "value": "NotAURI"},
+                        "value": {"type": "literal", "value": "Field"}
                     }
                 ]
             }
@@ -453,17 +449,17 @@ mod tests {
         let sparql_xml = r#"<?xml version="1.0"?>
 <sparql xmlns="http://www.w3.org/2005/sparql-results#">
   <head>
-    <variable name="s"/>
-    <variable name="label"/>
+    <variable name="id"/>
+    <variable name="value"/>
   </head>
   <results>
     <result>
-      <binding name="s"><uri>http://example.org/Q1</uri></binding>
-      <binding name="label"><literal>Universe</literal></binding>
+      <binding name="id"><uri>http://example.org/Q1</uri></binding>
+      <binding name="value"><literal>Universe</literal></binding>
     </result>
     <result>
-      <binding name="s"><uri>http://example.org/Q1</uri></binding>
-      <binding name="label"><literal>Cosmos</literal></binding>
+      <binding name="id"><uri>http://example.org/Q1</uri></binding>
+      <binding name="value"><literal>Cosmos</literal></binding>
     </result>
   </results>
 </sparql>"#;
@@ -478,8 +474,8 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
         assert_eq!(items[0].num_fields(), 2);
-        assert_eq!(items[0].fields[0], Field::Text("Universe".to_string()));
-        assert_eq!(items[0].fields[1], Field::Text("Cosmos".to_string()));
+        assert_eq!(items[0].fields[0], Field::text("Universe"));
+        assert_eq!(items[0].fields[1], Field::text("Cosmos"));
     }
 
     #[test]
@@ -487,25 +483,25 @@ mod tests {
         let sparql_xml = r#"<?xml version="1.0"?>
 <sparql xmlns="http://www.w3.org/2005/sparql-results#">
   <head>
-    <variable name="s"/>
-    <variable name="label"/>
+    <variable name="id"/>
+    <variable name="value"/>
   </head>
   <results>
     <result>
-      <binding name="s"><uri>http://example.org/Q1</uri></binding>
-      <binding name="label"><literal>First</literal></binding>
+      <binding name="id"><uri>http://example.org/Q1</uri></binding>
+      <binding name="value"><literal>First</literal></binding>
     </result>
     <result>
-      <binding name="s"><uri>http://example.org/Q2</uri></binding>
-      <binding name="label"><literal>Second</literal></binding>
+      <binding name="id"><uri>http://example.org/Q2</uri></binding>
+      <binding name="value"><literal>Second</literal></binding>
     </result>
     <result>
-      <binding name="s"><uri>http://example.org/Q2</uri></binding>
-      <binding name="label"><literal>Another</literal></binding>
+      <binding name="id"><uri>http://example.org/Q2</uri></binding>
+      <binding name="value"><literal>Another</literal></binding>
     </result>
     <result>
-      <binding name="s"><uri>http://example.org/Q3</uri></binding>
-      <binding name="label"><literal>Third</literal></binding>
+      <binding name="id"><uri>http://example.org/Q3</uri></binding>
+      <binding name="value"><literal>Third</literal></binding>
     </result>
   </results>
 </sparql>"#;
@@ -520,19 +516,19 @@ mod tests {
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
         assert_eq!(items[0].num_fields(), 1);
-        assert_eq!(items[0].fields[0], Field::Text("First".to_string()));
+        assert_eq!(items[0].fields[0], Field::text("First"));
         assert_eq!(items[1].identifier, "http://example.org/Q2");
         assert_eq!(items[1].num_fields(), 2);
-        assert_eq!(items[1].fields[0], Field::Text("Second".to_string()));
-        assert_eq!(items[1].fields[1], Field::Text("Another".to_string()));
+        assert_eq!(items[1].fields[0], Field::text("Second"));
+        assert_eq!(items[1].fields[1], Field::text("Another"));
         assert_eq!(items[2].identifier, "http://example.org/Q3");
         assert_eq!(items[2].num_fields(), 1);
-        assert_eq!(items[2].fields[0], Field::Text("Third".to_string()));
+        assert_eq!(items[2].fields[0], Field::text("Third"));
     }
 
     #[test]
     fn test_stream_tsv_format() {
-        let sparql_tsv = "?s\t?label\n\
+        let sparql_tsv = "?id\t?value\n\
             <http://example.org/Q1>\t\"Universe\"\n\
             <http://example.org/Q1>\t\"Cosmos\"\n\
             <http://example.org/Q2>\t\"Earth\"";
@@ -547,10 +543,10 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].identifier, "http://example.org/Q1");
         assert_eq!(items[0].num_fields(), 2);
-        assert_eq!(items[0].fields[0], Field::Text("Universe".to_string()));
-        assert_eq!(items[0].fields[1], Field::Text("Cosmos".to_string()));
+        assert_eq!(items[0].fields[0], Field::text("Universe"));
+        assert_eq!(items[0].fields[1], Field::text("Cosmos"));
         assert_eq!(items[1].identifier, "http://example.org/Q2");
         assert_eq!(items[1].num_fields(), 1);
-        assert_eq!(items[1].fields[0], Field::Text("Earth".to_string()));
+        assert_eq!(items[1].fields[0], Field::text("Earth"));
     }
 }

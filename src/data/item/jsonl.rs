@@ -57,17 +57,17 @@ fn test_stream_items_from_jsonl() {
     assert_eq!(items.len(), 3);
     assert_eq!(items[0].identifier, "Q1");
     assert_eq!(items[0].num_fields(), 2);
-    assert_eq!(items[0].fields[0], Field::Text("Universe".to_string()));
-    assert_eq!(items[0].fields[1], Field::Text("Cosmos".to_string()));
+    assert_eq!(items[0].fields[0], Field::text("Universe"));
+    assert_eq!(items[0].fields[1], Field::text("Cosmos"));
 
     assert_eq!(items[1].identifier, "Q2");
     assert_eq!(items[1].num_fields(), 2);
-    assert_eq!(items[1].fields[0], Field::Text("Earth".to_string()));
-    assert_eq!(items[1].fields[1], Field::Text("World".to_string()));
+    assert_eq!(items[1].fields[0], Field::text("Earth"));
+    assert_eq!(items[1].fields[1], Field::text("World"));
 
     assert_eq!(items[2].identifier, "Q3");
     assert_eq!(items[2].num_fields(), 1);
-    assert_eq!(items[2].fields[0], Field::Text("Human".to_string()));
+    assert_eq!(items[2].fields[0], Field::text("Human"));
 }
 
 #[test]
@@ -96,12 +96,12 @@ fn test_stream_items_from_jsonl_file() {
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].identifier, "Q42");
     assert_eq!(items[0].num_fields(), 2);
-    assert_eq!(items[0].fields[0], Field::Text("Douglas Adams".to_string()));
-    assert_eq!(items[0].fields[1], Field::Text("Author".to_string()));
+    assert_eq!(items[0].fields[0], Field::text("Douglas Adams"));
+    assert_eq!(items[0].fields[1], Field::text("Author"));
 
     assert_eq!(items[1].identifier, "Q100");
     assert_eq!(items[1].num_fields(), 3);
-    assert_eq!(items[1].fields[0], Field::Text("Test".to_string()));
-    assert_eq!(items[1].fields[1], Field::Text("Example".to_string()));
-    assert_eq!(items[1].fields[2], Field::Text("Demo".to_string()));
+    assert_eq!(items[1].fields[0], Field::text("Test"));
+    assert_eq!(items[1].fields[1], Field::text("Example"));
+    assert_eq!(items[1].fields[2], Field::text("Demo"));
 }

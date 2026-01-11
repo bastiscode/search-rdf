@@ -708,6 +708,7 @@ mod tests {
                 vec![StringField {
                     field_type: FieldType::Text,
                     value: "agar".to_string(),
+                    tags: vec![],
                 }],
             )
             .expect("Failed to create Item")),
@@ -716,6 +717,7 @@ mod tests {
                 vec![StringField {
                     field_type: FieldType::Text,
                     value: "agar agar".to_string(),
+                    tags: vec![],
                 }],
             )
             .expect("Failed to create Item")),
@@ -768,10 +770,12 @@ mod tests {
                 StringField {
                     field_type: FieldType::Text,
                     value: "United States".to_string(),
+                    tags: vec![],
                 },
                 StringField {
                     field_type: FieldType::Text,
                     value: "the U.S. of A".to_string(),
+                    tags: vec![],
                 },
             ],
         )
@@ -932,14 +936,17 @@ mod tests {
                     StringField {
                         field_type: FieldType::Text,
                         value: "common label".to_string(),
+                        tags: vec![],
                     },
                     StringField {
                         field_type: FieldType::Text,
                         value: "specific alpha".to_string(),
+                        tags: vec![],
                     },
                     StringField {
                         field_type: FieldType::Text,
                         value: "specific beta".to_string(),
+                        tags: vec![],
                     },
                 ],
             )
@@ -950,14 +957,17 @@ mod tests {
                     StringField {
                         field_type: FieldType::Text,
                         value: "common label".to_string(),
+                        tags: vec![],
                     },
                     StringField {
                         field_type: FieldType::Text,
                         value: "specific gamma".to_string(),
+                        tags: vec![],
                     },
                     StringField {
                         field_type: FieldType::Text,
                         value: "specific delta".to_string(),
+                        tags: vec![],
                     },
                 ],
             )

@@ -34,7 +34,7 @@ pub struct StringField {
     pub tags: Vec<FieldTag>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Field {
     data: FieldData,
     tags: Vec<FieldTag>,
@@ -42,16 +42,52 @@ pub struct Field {
 
 impl Field {
     pub fn type_and_tags(&self) -> u8 {
-        let mut type_and_tag = self.data.to_type().to_bit();
+        let mut type_and_tag = self.data.to_type().encode();
         for tag in &self.tags {
             // set tag bits
-            type_and_tag |= tag.to_bit();
+            type_and_tag |= tag.encode();
         }
         type_and_tag
     }
+
+    #[cfg(test)]
+    pub fn text(value: impl Into<String>) -> Self {
+        Self {
+            data: FieldData::Text(value.into()),
+            tags: vec![],
+        }
+    }
+
+    #[cfg(test)]
+    pub fn text_with_tags(value: impl Into<String>, tags: Vec<FieldTag>) -> Self {
+        Self {
+            data: FieldData::Text(value.into()),
+            tags,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn image(url: impl Into<String>) -> Self {
+        Self {
+            data: FieldData::Image(url.into()),
+            tags: vec![],
+        }
+    }
+
+    #[cfg(test)]
+    pub fn image_with_tags(url: impl Into<String>, tags: Vec<FieldTag>) -> Self {
+        Self {
+            data: FieldData::Image(url.into()),
+            tags,
+        }
+    }
+
+    pub fn has_tag(&self, tag: FieldTag) -> bool {
+        tag.is_set(self.type_and_tags())
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum FieldData {
     Text(String),
     ImageInline { url: String, data: Vec<u8> },
@@ -78,7 +114,7 @@ pub enum FieldType {
 }
 
 impl FieldType {
-    pub fn to_bit(&self) -> u8 {
+    pub fn encode(&self) -> u8 {
         let num = match self {
             FieldType::Text => 0,
             FieldType::Image => 1,
@@ -109,14 +145,14 @@ pub enum FieldTag {
 }
 
 impl FieldTag {
-    pub fn to_bit(&self) -> u8 {
+    pub fn encode(&self) -> u8 {
         match self {
             FieldTag::Main => 0b0000_0001,
         }
     }
 
     pub fn is_set(&self, byte: u8) -> bool {
-        let bit = self.to_bit();
+        let bit = self.encode();
         (byte & bit) != 0
     }
 }
@@ -529,10 +565,12 @@ mod tests {
                 StringField {
                     field_type: FieldType::Text,
                     value: "Berlin".to_string(),
+                    tags: vec![],
                 },
                 StringField {
                     field_type: FieldType::Text,
                     value: "Capital of Germany".to_string(),
+                    tags: vec![],
                 },
             ],
         )
@@ -540,7 +578,7 @@ mod tests {
 
         assert_eq!(item.identifier, "Q64");
         assert_eq!(item.num_fields(), 2);
-        assert_eq!(item.fields[0], Field::Text("Berlin".to_string()));
+        assert_eq!(item.fields[0], Field::text("Berlin"));
     }
 
     #[test]
@@ -551,10 +589,12 @@ mod tests {
                 StringField {
                     field_type: FieldType::Image,
                     value: "https://example.com/berlin1.jpg".to_string(),
+                    tags: vec![],
                 },
                 StringField {
                     field_type: FieldType::Image,
                     value: "file:///path/to/berlin2.jpg".to_string(),
+                    tags: vec![],
                 },
             ],
         )
@@ -563,7 +603,7 @@ mod tests {
         assert_eq!(item.num_fields(), 2);
         assert_eq!(
             item.fields[0],
-            Field::Image("https://example.com/berlin1.jpg".to_string())
+            Field::image("https://example.com/berlin1.jpg")
         );
     }
 
@@ -575,10 +615,12 @@ mod tests {
                 StringField {
                     field_type: FieldType::Text,
                     value: "Douglas Adams".to_string(),
+                    tags: vec![],
                 },
                 StringField {
                     field_type: FieldType::Text,
                     value: "Hitchhiker's Guide".to_string(),
+                    tags: vec![],
                 },
             ],
         )
@@ -604,14 +646,17 @@ mod tests {
                 StringField {
                     field_type: FieldType::Text,
                     value: "first".to_string(),
+                    tags: vec![],
                 },
                 StringField {
                     field_type: FieldType::Text,
                     value: "second".to_string(),
+                    tags: vec![],
                 },
                 StringField {
                     field_type: FieldType::Text,
                     value: "third".to_string(),
+                    tags: vec![],
                 },
             ],
         )
@@ -634,14 +679,17 @@ mod tests {
                 StringField {
                     field_type: FieldType::Text,
                     value: "a".to_string(),
+                    tags: vec![],
                 },
                 StringField {
                     field_type: FieldType::Text,
                     value: "b".to_string(),
+                    tags: vec![],
                 },
                 StringField {
                     field_type: FieldType::Text,
                     value: "c".to_string(),
+                    tags: vec![],
                 },
             ],
         )
@@ -663,6 +711,7 @@ mod tests {
             vec![StringField {
                 field_type: FieldType::Text,
                 value: "field".to_string(),
+                tags: vec![],
             }],
         );
 
@@ -681,6 +730,7 @@ mod tests {
             StringField {
                 field_type: FieldType::Text,
                 value: "field".to_string(),
+                tags: vec![],
             };
             (u16::MAX as usize) + 1
         ];
@@ -710,14 +760,17 @@ mod tests {
                 StringField {
                     field_type: FieldType::Text,
                     value: "UTF-8: 你好世界".to_string(),
+                    tags: vec![],
                 },
                 StringField {
                     field_type: FieldType::Text,
                     value: "Emoji: 🦀".to_string(),
+                    tags: vec![],
                 },
                 StringField {
                     field_type: FieldType::Text,
                     value: "Special: @#$%".to_string(),
+                    tags: vec![],
                 },
             ],
         )
@@ -730,5 +783,61 @@ mod tests {
         assert_eq!(fields[0].as_str(), "UTF-8: 你好世界");
         assert_eq!(fields[1].as_str(), "Emoji: 🦀");
         assert_eq!(fields[2].as_str(), "Special: @#$%");
+    }
+
+    #[test]
+    fn test_field_tags_basic() {
+        let field_no_tags = Field::text("No tags");
+        let field_with_main = Field::text_with_tags("Main field", vec![FieldTag::Main]);
+
+        assert_eq!(field_no_tags.type_and_tags(), FieldType::Text.encode());
+        assert_eq!(
+            field_with_main.type_and_tags(),
+            FieldType::Text.encode() | FieldTag::Main.encode()
+        );
+    }
+
+    #[test]
+    fn test_field_tags_encode_decode() {
+        let item = Item::from_string_fields(
+            "Q1".to_string(),
+            vec![
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "Main label".to_string(),
+                    tags: vec![FieldTag::Main],
+                },
+                StringField {
+                    field_type: FieldType::Text,
+                    value: "Alternative label".to_string(),
+                    tags: vec![],
+                },
+            ],
+        )
+        .expect("Failed to create item");
+
+        let encoded = item.encode();
+        let item_ref = ItemRef::decode(&encoded).expect("Failed to decode");
+
+        assert_eq!(item_ref.num_fields(), 2);
+        let field0 = item_ref.field(0).unwrap();
+        let field1 = item_ref.field(1).unwrap();
+
+        assert!(field0.has_tag(FieldTag::Main));
+        assert!(!field1.has_tag(FieldTag::Main));
+    }
+
+    #[test]
+    fn test_field_tag_to_bit() {
+        assert_eq!(FieldTag::Main.encode(), 0b0000_0001);
+    }
+
+    #[test]
+    fn test_field_tag_is_set() {
+        let byte_with_main = FieldType::Text.encode() | FieldTag::Main.encode();
+        let byte_without_main = FieldType::Text.encode();
+
+        assert!(FieldTag::Main.is_set(byte_with_main));
+        assert!(!FieldTag::Main.is_set(byte_without_main));
     }
 }
