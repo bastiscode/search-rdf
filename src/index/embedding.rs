@@ -23,13 +23,13 @@ use usearch::ffi::MetricKind;
 use usearch::{Index, b1x8};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum Metric {
-    #[serde(rename = "cosine-normalized")]
     CosineNormalized,
     Cosine,
-    #[serde(rename = "inner-product")]
+    #[serde(alias = "dot-product")]
     InnerProduct,
+    #[serde(alias = "euclidean")]
     L2,
     Hamming,
 }

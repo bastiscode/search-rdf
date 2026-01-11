@@ -30,6 +30,7 @@ pyo3 = { version = "0.27", features = [
   "abi3-py312",
   "auto-initialize",
 ] }
+pythonize = "0.27"
 numpy = "0.27"
 byte-trie = { path = "./byte-trie" }
 sparesults = "0.3"

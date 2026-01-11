@@ -19,10 +19,15 @@ const F32_SIZE: usize = size_of::<f32>();
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Precision {
+    #[serde(alias = "fp32")]
     Float32,
+    #[serde(alias = "fp16")]
     Float16,
+    #[serde(alias = "bfp16", alias = "bf16")]
     BFloat16,
+    #[serde(alias = "i8", alias = "uint8")]
     Int8,
+    #[serde(alias = "bit", alias = "ubinary")]
     Binary,
 }
 

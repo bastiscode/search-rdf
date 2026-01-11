@@ -20,20 +20,20 @@ use sparesults::{
 use crate::data::item::{FieldType, Item, StringField};
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum SPARQLResultFormat {
     #[default]
-    JSON,
-    XML,
-    TSV,
+    Json,
+    Xml,
+    Tsv,
 }
 
 impl SPARQLResultFormat {
     pub fn mime_type(&self) -> &str {
         match self {
-            SPARQLResultFormat::JSON => "application/sparql-results+json",
-            SPARQLResultFormat::XML => "application/sparql-results+xml",
-            SPARQLResultFormat::TSV => "text/tab-separated-values",
+            SPARQLResultFormat::Json => "application/sparql-results+json",
+            SPARQLResultFormat::Xml => "application/sparql-results+xml",
+            SPARQLResultFormat::Tsv => "text/tab-separated-values",
         }
     }
 }
@@ -41,9 +41,9 @@ impl SPARQLResultFormat {
 impl From<SPARQLResultFormat> for QueryResultsFormat {
     fn from(format: SPARQLResultFormat) -> Self {
         match format {
-            SPARQLResultFormat::JSON => QueryResultsFormat::Json,
-            SPARQLResultFormat::XML => QueryResultsFormat::Xml,
-            SPARQLResultFormat::TSV => QueryResultsFormat::Tsv,
+            SPARQLResultFormat::Json => QueryResultsFormat::Json,
+            SPARQLResultFormat::Xml => QueryResultsFormat::Xml,
+            SPARQLResultFormat::Tsv => QueryResultsFormat::Tsv,
         }
     }
 }
@@ -271,9 +271,9 @@ pub fn guess_sparql_result_format_from_extension(file_path: &Path) -> Result<SPA
         .to_lowercase();
 
     let format = match ext.as_str() {
-        "json" => SPARQLResultFormat::JSON,
-        "xml" => SPARQLResultFormat::XML,
-        "tsv" => SPARQLResultFormat::TSV,
+        "json" => SPARQLResultFormat::Json,
+        "xml" => SPARQLResultFormat::Xml,
+        "tsv" => SPARQLResultFormat::Tsv,
         _ => {
             return Err(anyhow!(
                 "Could not guess SPARQL result format from file extension: {}",
@@ -311,7 +311,7 @@ mod tests {
 
         let cursor = Cursor::new(sparql_json);
         let items: Vec<_> =
-            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON, FieldType::Text)
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::Json, FieldType::Text)
                 .expect("Failed to create iterator")
                 .collect::<Result<Vec<_>>>()
                 .expect("Failed to parse SPARQL JSON");
@@ -351,7 +351,7 @@ mod tests {
 
         let cursor = Cursor::new(sparql_json);
         let items: Vec<_> =
-            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON, FieldType::Text)
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::Json, FieldType::Text)
                 .expect("Failed to create iterator")
                 .collect::<Result<Vec<_>>>()
                 .expect("Failed to parse SPARQL JSON");
@@ -380,7 +380,7 @@ mod tests {
 
         let cursor = Cursor::new(sparql_json);
         let items: Vec<_> =
-            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON, FieldType::Text)
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::Json, FieldType::Text)
                 .expect("Failed to create iterator")
                 .collect::<Result<Vec<_>>>()
                 .expect("Failed to parse SPARQL JSON");
@@ -407,7 +407,7 @@ mod tests {
 
         let cursor = Cursor::new(sparql_json);
         let result =
-            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON, FieldType::Text);
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::Json, FieldType::Text);
 
         match result {
             Err(e) => assert!(e.to_string().contains("Expected 2 to 4 variables")),
@@ -431,7 +431,7 @@ mod tests {
 
         let cursor = Cursor::new(sparql_json);
         let result: Result<Vec<_>> =
-            stream_items_from_sparql_result(cursor, SPARQLResultFormat::JSON, FieldType::Text)
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::Json, FieldType::Text)
                 .expect("Failed to create iterator")
                 .collect();
 
@@ -466,7 +466,7 @@ mod tests {
 
         let cursor = Cursor::new(sparql_xml);
         let items: Vec<_> =
-            stream_items_from_sparql_result(cursor, SPARQLResultFormat::XML, FieldType::Text)
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::Xml, FieldType::Text)
                 .expect("Failed to create iterator")
                 .collect::<Result<Vec<_>>>()
                 .expect("Failed to parse SPARQL XML");
@@ -508,7 +508,7 @@ mod tests {
 
         let cursor = Cursor::new(sparql_xml);
         let items: Vec<_> =
-            stream_items_from_sparql_result(cursor, SPARQLResultFormat::XML, FieldType::Text)
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::Xml, FieldType::Text)
                 .expect("Failed to create iterator")
                 .collect::<Result<Vec<_>>>()
                 .expect("Failed to parse SPARQL XML");
@@ -535,7 +535,7 @@ mod tests {
 
         let cursor = Cursor::new(sparql_tsv);
         let items: Vec<_> =
-            stream_items_from_sparql_result(cursor, SPARQLResultFormat::TSV, FieldType::Text)
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::Tsv, FieldType::Text)
                 .expect("Failed to create iterator")
                 .collect::<Result<Vec<_>>>()
                 .expect("Failed to parse SPARQL TSV");

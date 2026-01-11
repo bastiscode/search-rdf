@@ -278,7 +278,7 @@ server:
                 assert_eq!(endpoint, "https://query.wikidata.org/sparql");
                 assert!(query.as_ref().unwrap().contains("SELECT ?item ?label"));
                 assert!(path.is_none());
-                assert_eq!(format, &SPARQLResultFormat::JSON);
+                assert_eq!(format, &SPARQLResultFormat::Json);
                 assert!(headers.is_none());
                 assert_eq!(default_field_type, &FieldType::Text);
             }

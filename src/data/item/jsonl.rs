@@ -9,9 +9,9 @@ use std::{
 use crate::data::item::{Item, StringField};
 
 #[derive(Deserialize)]
-struct ItemJson {
-    identifier: String,
-    fields: Vec<StringField>,
+pub struct ItemJson {
+    pub identifier: String,
+    pub fields: Vec<StringField>,
 }
 
 impl TryFrom<ItemJson> for Item {

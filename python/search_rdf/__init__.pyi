@@ -1,10 +1,21 @@
 """Type stubs for search_index module."""
 
-from typing import Iterator, final
+from typing import Any, Iterator, final
 
 @final
 class Data:
     """Data source built from JSONL or SPARQL result file."""
+
+    @staticmethod
+    def build_from_items(items: list[dict[str, Any]], data_dir: str) -> None:
+        """
+        Build data from a list of items.
+
+        Args:
+            items: List of data items (dictionary with "identifier" and "fields")
+            data_dir: Output directory for the data
+        """
+        ...
 
     @staticmethod
     def build_from_jsonl(file_path: str, data_dir: str) -> None:

@@ -13,17 +13,13 @@ impl<'a, 'py> FromPyObject<'a, 'py> for Metric {
     type Error = anyhow::Error;
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
-        let Ok(value) = obj.extract::<&str>() else {
-            return Err(anyhow!("Metric must be a string"));
-        };
-        match value.to_lowercase().as_str() {
-            "cosinenormalized" | "cosine-normalized" => Ok(Metric::CosineNormalized),
-            "cosine" => Ok(Metric::Cosine),
-            "inner-product" | "innerproduct" | "ip" => Ok(Metric::InnerProduct),
-            "euclidean" | "l2" => Ok(Metric::L2),
-            "hamming" => Ok(Metric::Hamming),
-            other => Err(anyhow!("unsupported metric: {other}")),
-        }
+        let s: &str = obj.extract()?;
+        serde_plain::from_str(s).map_err(|_| {
+            anyhow!(
+                "Invalid metric: {}. Expected one of: cosine, cosine-normalized, l2, inner-product, hamming",
+                s
+            )
+        })
     }
 }
 
@@ -32,20 +28,12 @@ impl<'a, 'py> FromPyObject<'a, 'py> for Precision {
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
         let s: &str = obj.extract()?;
-        let precision = match s.to_lowercase().as_str() {
-            "float32" | "fp32" => Precision::Float32,
-            "binary" | "bit" => Precision::Binary,
-            "float16" | "fp16" => Precision::Float16,
-            "bfloat16" | "bfp16" => Precision::BFloat16,
-            "int8" | "i8" => Precision::Int8,
-            _ => {
-                return Err(anyhow!(
-                    "Invalid Precision: {}. Expected one of: float32, binary, float16, bfloat16, int8",
-                    s
-                ));
-            }
-        };
-        Ok(precision)
+        serde_plain::from_str(s).map_err(|_| {
+            anyhow!(
+                "Invalid precision: {}. Expected one of: float32, float16, bfloat16, int8, binary",
+                s
+            )
+        })
     }
 }
 #[pyclass]
@@ -128,5 +116,198 @@ impl EmbeddingIndex {
     #[getter]
     pub fn model(&self) -> &str {
         self.inner.data().model()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyo3::Python;
+
+    #[test]
+    fn test_from_pyobject_metric_cosine() {
+        Python::attach(|py| {
+            let s = "cosine".into_pyobject(py).unwrap();
+            let metric: Metric = s.extract().unwrap();
+            assert!(matches!(metric, Metric::Cosine));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_metric_cosine_normalized() {
+        Python::attach(|py| {
+            let s = "cosine-normalized".into_pyobject(py).unwrap();
+            let metric: Metric = s.extract().unwrap();
+            assert!(matches!(metric, Metric::CosineNormalized));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_metric_l2() {
+        Python::attach(|py| {
+            let s = "l2".into_pyobject(py).unwrap();
+            let metric: Metric = s.extract().unwrap();
+            assert!(matches!(metric, Metric::L2));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_metric_euclidean_alias() {
+        Python::attach(|py| {
+            let s = "euclidean".into_pyobject(py).unwrap();
+            let metric: Metric = s.extract().unwrap();
+            assert!(matches!(metric, Metric::L2));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_metric_inner_product() {
+        Python::attach(|py| {
+            let s = "inner-product".into_pyobject(py).unwrap();
+            let metric: Metric = s.extract().unwrap();
+            assert!(matches!(metric, Metric::InnerProduct));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_metric_dot_product_alias() {
+        Python::attach(|py| {
+            let s = "dot-product".into_pyobject(py).unwrap();
+            let metric: Metric = s.extract().unwrap();
+            assert!(matches!(metric, Metric::InnerProduct));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_metric_hamming() {
+        Python::attach(|py| {
+            let s = "hamming".into_pyobject(py).unwrap();
+            let metric: Metric = s.extract().unwrap();
+            assert!(matches!(metric, Metric::Hamming));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_metric_invalid() {
+        Python::attach(|py| {
+            let s = "invalid".into_pyobject(py).unwrap();
+            let result: Result<Metric> = s.extract();
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("Invalid metric"));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_precision_float32() {
+        Python::attach(|py| {
+            let s = "float32".into_pyobject(py).unwrap();
+            let precision: Precision = s.extract().unwrap();
+            assert!(matches!(precision, Precision::Float32));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_precision_fp32_alias() {
+        Python::attach(|py| {
+            let s = "fp32".into_pyobject(py).unwrap();
+            let precision: Precision = s.extract().unwrap();
+            assert!(matches!(precision, Precision::Float32));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_precision_float16() {
+        Python::attach(|py| {
+            let s = "float16".into_pyobject(py).unwrap();
+            let precision: Precision = s.extract().unwrap();
+            assert!(matches!(precision, Precision::Float16));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_precision_fp16_alias() {
+        Python::attach(|py| {
+            let s = "fp16".into_pyobject(py).unwrap();
+            let precision: Precision = s.extract().unwrap();
+            assert!(matches!(precision, Precision::Float16));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_precision_bfloat16() {
+        Python::attach(|py| {
+            let s = "bfloat16".into_pyobject(py).unwrap();
+            let precision: Precision = s.extract().unwrap();
+            assert!(matches!(precision, Precision::BFloat16));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_precision_bf16_alias() {
+        Python::attach(|py| {
+            let s = "bf16".into_pyobject(py).unwrap();
+            let precision: Precision = s.extract().unwrap();
+            assert!(matches!(precision, Precision::BFloat16));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_precision_int8() {
+        Python::attach(|py| {
+            let s = "int8".into_pyobject(py).unwrap();
+            let precision: Precision = s.extract().unwrap();
+            assert!(matches!(precision, Precision::Int8));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_precision_i8_alias() {
+        Python::attach(|py| {
+            let s = "i8".into_pyobject(py).unwrap();
+            let precision: Precision = s.extract().unwrap();
+            assert!(matches!(precision, Precision::Int8));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_precision_binary() {
+        Python::attach(|py| {
+            let s = "binary".into_pyobject(py).unwrap();
+            let precision: Precision = s.extract().unwrap();
+            assert!(matches!(precision, Precision::Binary));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_precision_ubinary_alias() {
+        Python::attach(|py| {
+            let s = "ubinary".into_pyobject(py).unwrap();
+            let precision: Precision = s.extract().unwrap();
+            assert!(matches!(precision, Precision::Binary));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_precision_bit_alias() {
+        Python::attach(|py| {
+            let s = "bit".into_pyobject(py).unwrap();
+            let precision: Precision = s.extract().unwrap();
+            assert!(matches!(precision, Precision::Binary));
+        });
+    }
+
+    #[test]
+    fn test_from_pyobject_precision_invalid() {
+        Python::attach(|py| {
+            let s = "invalid".into_pyobject(py).unwrap();
+            let result: Result<Precision> = s.extract();
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("Invalid precision")
+            );
+        });
     }
 }
