@@ -74,6 +74,7 @@ pub enum ModelType {
         #[serde(default = "default_model_batch_size")]
         batch_size: usize,
     },
+    #[serde(alias = "huggingface-image")]
     HuggingFaceImage {
         model_name: String,
         #[serde(default = "default_device")]

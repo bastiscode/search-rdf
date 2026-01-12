@@ -128,7 +128,7 @@ fn parse_solution(
         if let Some(Some(field_type)) = field_type_column.and_then(|col| values.get(col)) {
             let Term::Literal(type_literal) = field_type else {
                 return Err(anyhow!(
-                    "Expected third variable (type) to be a string literal, found {:?}",
+                    "Expected type binding to be a string literal, found {:?}",
                     field_type
                 ));
             };
@@ -140,7 +140,7 @@ fn parse_solution(
     let tags = if let Some(Some(field_tag)) = field_tag_column.and_then(|col| values.get(col)) {
         let Term::Literal(tag_literal) = field_tag else {
             return Err(anyhow!(
-                "Expected fourth variable (tag) to be a string literal, found {:?}",
+                "Expected tag binding to be a string literal, found {:?}",
                 field_tag
             ));
         };
@@ -244,7 +244,9 @@ pub fn stream_items_from_sparql_result<R: Read>(
         ));
     }
     let field_type_column = variables.iter().position(|v| v.as_str() == "type");
-    let field_tag_column = variables.iter().position(|v| v.as_str() == "tags");
+    let field_tag_column = variables
+        .iter()
+        .position(|v| v.as_str() == "tags" || v.as_str() == "tag");
 
     Ok(SPARQLResultIterator::new(
         solutions,
