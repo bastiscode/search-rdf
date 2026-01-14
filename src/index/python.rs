@@ -72,10 +72,10 @@ impl EmbeddingIndex {
         Ok(Self { inner })
     }
 
-    #[pyo3(signature = (query, k=10, exact=false, min_score=None, rerank=None, allow_ids=None))]
+    #[pyo3(signature = (embedding, k=10, exact=false, min_score=None, rerank=None, allow_ids=None))]
     pub fn search(
         &self,
-        query: Embedding,
+        embedding: Embedding,
         k: usize,
         exact: bool,
         min_score: Option<f32>,
@@ -91,9 +91,9 @@ impl EmbeddingIndex {
 
         if let Some(ids) = allow_ids {
             self.inner
-                .search_with_filter(&query, &params, move |id| ids.contains(&id))
+                .search_with_filter(&embedding, &params, move |id| ids.contains(&id))
         } else {
-            self.inner.search(&query, &params)
+            self.inner.search(&embedding, &params)
         }
     }
 

@@ -133,6 +133,10 @@ impl Data {
         self.inner.field(id, field).map(|s| s.as_str())
     }
 
+    pub fn main_field(&self, id: u32) -> Option<&str> {
+        self.inner.main_field(id).map(|s| s.as_str())
+    }
+
     pub fn fields(&self, id: u32) -> Option<Vec<&str>> {
         self.inner
             .fields(id)
