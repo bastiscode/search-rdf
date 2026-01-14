@@ -48,7 +48,7 @@ class TextEmbeddingModel:
             dim = self.dim
 
         if not texts:
-            return np.empty((0, dim))
+            return np.empty((0, dim), dtype=np.float32)
 
         if batch_size is None:
             batch_size = len(texts)

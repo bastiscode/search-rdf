@@ -99,7 +99,7 @@ impl EmbeddingIndex {
 
     #[getter]
     pub fn index_type(&self) -> &str {
-        self.inner.index_type()
+        "embedding"
     }
 
     pub fn data(&self) -> Data {
