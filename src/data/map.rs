@@ -127,8 +127,7 @@ impl OrderedDataMap {
     }
 
     pub fn load(path: &Path) -> Result<Self> {
-        let map = load_bincode(path)?;
-        Ok(map)
+        load_bincode(path)
     }
 }
 
@@ -321,6 +320,7 @@ mod tests {
         assert_eq!(map.count(1), Some(3));
         assert_eq!(map.count(2), Some(1));
         assert_eq!(map.count(3), None);
+        assert_eq!(map.total_count, 6);
     }
 
     #[test]
