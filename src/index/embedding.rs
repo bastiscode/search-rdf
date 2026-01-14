@@ -762,7 +762,7 @@ mod embedding_index_tests {
 
         create_dir_all(&data_dir).expect("Failed to create data dir");
 
-        let embeddings_file = data_dir.join("embedding.safetensors");
+        let embedding_path = data_dir.join("embedding.safetensors");
 
         // Create normalized test embeddings with duplicate IDs
         let mut embeddings = vec![
@@ -778,7 +778,7 @@ mod embedding_index_tests {
 
         let ids = vec![100, 100, 200, 300]; // ID 100 appears twice
 
-        create_test_safetensors(&embeddings_file, embeddings.clone(), ids)
+        create_test_safetensors(&embedding_path, embeddings.clone(), ids)
             .expect("Failed to create safetensors");
 
         // Build data
@@ -891,7 +891,7 @@ mod embedding_index_tests {
         // Test InnerProduct metric with unnormalized embeddings
         let data_dir_ip = temp_dir.path().join("data_ip");
         create_dir_all(&data_dir_ip).expect("Failed to create data dir");
-        let embeddings_file_ip = data_dir_ip.join("embedding.safetensors");
+        let embedding_path_ip = data_dir_ip.join("embedding.safetensors");
 
         // Create unnormalized embeddings
         let embeddings_ip = vec![
@@ -901,7 +901,7 @@ mod embedding_index_tests {
             vec![0.0, 0.0, 2.0, 0.0], // ID 300
         ];
 
-        create_test_safetensors(&embeddings_file_ip, embeddings_ip, vec![100, 100, 200, 300])
+        create_test_safetensors(&embedding_path_ip, embeddings_ip, vec![100, 100, 200, 300])
             .expect("Failed to create safetensors");
 
         Embeddings::build(&data_dir_ip).expect("Failed to build data");
@@ -954,7 +954,7 @@ mod embedding_index_tests {
         // Since we're storing float32 vectors and converting to binary, use 32D (4 bytes packed)
         let data_dir_hamming = temp_dir.path().join("data_hamming");
         create_dir_all(&data_dir_hamming).expect("Failed to create data dir");
-        let embeddings_file_hamming = data_dir_hamming.join("embedding.safetensors");
+        let embedding_path_hamming = data_dir_hamming.join("embedding.safetensors");
 
         // Create 32-dimensional binary-like embeddings (4 bytes when packed)
         let mut emb1 = vec![1.0; 16];
@@ -969,7 +969,7 @@ mod embedding_index_tests {
         let embeddings_hamming = vec![emb1, emb2, emb3, emb4];
 
         create_test_safetensors(
-            &embeddings_file_hamming,
+            &embedding_path_hamming,
             embeddings_hamming.clone(),
             vec![100, 100, 200, 300],
         )

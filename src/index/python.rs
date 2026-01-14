@@ -44,10 +44,10 @@ pub struct EmbeddingIndex {
 #[pymethods]
 impl EmbeddingIndex {
     #[staticmethod]
-    #[pyo3(signature = (data, embeddings_path, index_dir, metric=None, precision=None))]
+    #[pyo3(signature = (data, embedding_path, index_dir, metric=None, precision=None))]
     pub fn build(
         data: Data,
-        embeddings_path: &str,
+        embedding_path: &str,
         index_dir: &str,
         metric: Option<Metric>,
         precision: Option<Precision>,
@@ -61,13 +61,13 @@ impl EmbeddingIndex {
             params = params.with_metric(metric);
         };
 
-        let data = EmbeddingsWithData::load(data.inner, embeddings_path.as_ref())?;
+        let data = EmbeddingsWithData::load(data.inner, embedding_path.as_ref())?;
         EmbeddingIndexWithData::build(&data, index_dir.as_ref(), &params)
     }
 
     #[staticmethod]
-    pub fn load(data: Data, embeddings_path: &str, index_dir: &str) -> Result<Self> {
-        let data = EmbeddingsWithData::load(data.inner, embeddings_path.as_ref())?;
+    pub fn load(data: Data, embedding_path: &str, index_dir: &str) -> Result<Self> {
+        let data = EmbeddingsWithData::load(data.inner, embedding_path.as_ref())?;
         let inner = EmbeddingIndexWithData::load(data, index_dir.as_ref())?;
         Ok(Self { inner })
     }

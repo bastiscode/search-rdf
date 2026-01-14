@@ -147,7 +147,7 @@ class EmbeddingIndex:
     @staticmethod
     def build(
         data: Data,
-        embeddings_path: str,
+        embedding_path: str,
         index_dir: str,
         metric: str | None = None,
         precision: str | None = None,
@@ -157,7 +157,7 @@ class EmbeddingIndex:
 
         Args:
             data: Data to index
-            embeddings_path: Path to the embeddings for the data
+            embedding_path: Path to the embeddings for the data
             index_dir: Output directory for the index
             metric: Distance metric ("cosine", "inner_product", "ip", "l2", "hamming")
             precision: Precision ("float32", "binary", "float16", "bfloat16", "int8")
@@ -165,13 +165,13 @@ class EmbeddingIndex:
         ...
 
     @staticmethod
-    def load(data: Data, embeddings_path: str, index_dir: str) -> EmbeddingIndex:
+    def load(data: Data, embedding_path: str, index_dir: str) -> EmbeddingIndex:
         """
         Load an embedding search index.
 
         Args:
             data: Data associated with the index
-            embeddings_path: Path to the embeddings for the data
+            embedding_path: Path to the embeddings for the data
             index_dir: Directory containing the index
 
         Returns:

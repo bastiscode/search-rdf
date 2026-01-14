@@ -77,14 +77,14 @@ impl Tensors {
         let embedding_shape = embedding.shape();
         if embedding_shape.len() != 2 {
             return Err(anyhow!(
-                "Expected 2D embeddings tensor, got shape {:?}",
+                "Expected 2D embedding tensor, got shape {:?}",
                 embedding_shape
             ));
         }
 
         if embedding.dtype() != Dtype::F32 {
             return Err(anyhow!(
-                "Expected F32 embeddings tensor, got dtype {:?}",
+                "Expected F32 embedding tensor, got dtype {:?}",
                 embedding.dtype()
             ));
         }
@@ -108,7 +108,7 @@ impl Tensors {
 
             if id_shape[0] != embedding_shape[0] {
                 return Err(anyhow!(
-                    "ID tensor length ({}) does not match embeddings length ({})",
+                    "ID tensor length ({}) does not match embedding length ({})",
                     id_shape[0],
                     embedding_shape[0]
                 ));
@@ -179,12 +179,12 @@ pub struct Embeddings {
 
 impl Embeddings {
     pub fn build(data_dir: &Path) -> Result<()> {
-        let embeddings_file = data_dir.join("embedding.safetensors");
-        let tensors = Tensors::load(&embeddings_file)?;
+        let embedding_path = data_dir.join("embedding.safetensors");
+        let tensors = Tensors::load(&embedding_path)?;
 
         // Build ID map from 'id' tensor
         let Some(ids) = tensors.ids() else {
-            return Err(anyhow!("embeddings file missing 'id' tensor"));
+            return Err(anyhow!("embedding file missing 'id' tensor"));
         };
 
         let id_map_file = data_dir.join("id-map.bin");
@@ -196,11 +196,11 @@ impl Embeddings {
 
     /// Load Embeddings from directory
     pub fn load(data_dir: &Path) -> Result<Self> {
-        let embeddings_file = data_dir.join("embedding.safetensors");
-        let tensors = Tensors::load(&embeddings_file)?;
+        let embedding_path = data_dir.join("embedding.safetensors");
+        let tensors = Tensors::load(&embedding_path)?;
 
         if tensors.ids().is_none() {
-            return Err(anyhow!("embeddings file missing 'id' tensor"));
+            return Err(anyhow!("embedding file missing 'id' tensor"));
         }
 
         let id_map_file = data_dir.join("id-map.bin");
@@ -279,8 +279,8 @@ pub struct EmbeddingsWithData {
 }
 
 impl EmbeddingsWithData {
-    pub fn load(data: Data, embeddings_file: &Path) -> Result<Self> {
-        let tensors = Tensors::load(embeddings_file)?;
+    pub fn load(data: Data, embedding_path: &Path) -> Result<Self> {
+        let tensors = Tensors::load(embedding_path)?;
 
         if data.total_fields() as usize != tensors.len() {
             return Err(anyhow!(
@@ -418,7 +418,7 @@ mod tests {
         let data_dir = temp_dir.path().join("data");
         std::fs::create_dir_all(&data_dir).expect("Failed to create data dir");
 
-        let embeddings_file = data_dir.join("embedding.safetensors");
+        let embedding_path = data_dir.join("embedding.safetensors");
 
         // Create test embeddings with sorted IDs (required for OrderedIdMap)
         let embeddings = vec![
@@ -428,7 +428,7 @@ mod tests {
         ];
         let ids = vec![100, 200, 300]; // Must be sorted for OrderedIdMap
 
-        create_test_safetensors(&embeddings_file, embeddings.clone(), ids.clone())
+        create_test_safetensors(&embedding_path, embeddings.clone(), ids.clone())
             .expect("Failed to create safetensors");
 
         // Build and load
@@ -480,7 +480,7 @@ mod tests {
         let data_dir = temp_dir.path().join("data");
         std::fs::create_dir_all(&data_dir).expect("Failed to create data dir");
 
-        let embeddings_file = data_dir.join("embedding.safetensors");
+        let embedding_path = data_dir.join("embedding.safetensors");
 
         use safetensors::serialize;
         use safetensors::tensor::{Dtype, TensorView};
@@ -501,7 +501,7 @@ mod tests {
         // missing metadata
         let tensors = vec![("embedding", embedding_tensor), ("id", id_tensor)];
         let bytes = serialize(tensors.clone(), None).unwrap(); // No metadata!
-        std::fs::write(&embeddings_file, bytes).unwrap();
+        std::fs::write(&embedding_path, bytes).unwrap();
 
         let result = Embeddings::build(&data_dir);
         assert!(result.is_err());
@@ -509,7 +509,7 @@ mod tests {
 
         // missing 'model' key
         let bytes = serialize(tensors, Some(HashMap::new())).unwrap(); // No metadata!
-        std::fs::write(&embeddings_file, bytes).unwrap();
+        std::fs::write(&embedding_path, bytes).unwrap();
 
         let result = Embeddings::build(&data_dir);
         assert!(result.is_err());
@@ -527,7 +527,7 @@ mod tests {
         let data_dir = temp_dir.path().join("data");
         std::fs::create_dir_all(&data_dir).expect("Failed to create data dir");
 
-        let embeddings_file = data_dir.join("embedding.safetensors");
+        let embedding_path = data_dir.join("embedding.safetensors");
 
         use safetensors::serialize;
         use safetensors::tensor::{Dtype, TensorView};
@@ -554,7 +554,7 @@ mod tests {
             )])),
         )
         .unwrap();
-        std::fs::write(&embeddings_file, bytes).unwrap();
+        std::fs::write(&embedding_path, bytes).unwrap();
 
         let result = Embeddings::build(&data_dir);
 
