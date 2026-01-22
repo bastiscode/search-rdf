@@ -563,7 +563,7 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("ID tensor length (3) does not match embeddings length (2)")
+                .contains("ID tensor length (3) does not match embedding length (2)")
         );
     }
 }

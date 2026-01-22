@@ -29,7 +29,7 @@ pub struct SearchRequest {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", content = "value", rename_all = "lowercase")]
 pub enum Query {
     Text(String),
     Url(String),
