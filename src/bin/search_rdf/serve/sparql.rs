@@ -29,6 +29,10 @@ use crate::search_rdf::serve::search::{
 use super::search::SearchMatch;
 use super::types::{AppError, AppState};
 
+fn trim_identifier(iri: &str) -> &str {
+    iri.trim_start_matches('<').trim_end_matches('>')
+}
+
 /// Convert a SearchMatch to SPARQL bindings based on output variable configuration
 /// Returns a tuple of (variables, values) that can be used to create a QuerySolution
 fn search_match_to_solution(
@@ -58,9 +62,10 @@ fn search_match_to_solution(
 
     // Extract identifier and field from MatchInfo if available
     if let MatchInfo::Field { identifier, field } = search_match.info {
-        values.push(Some(Term::NamedNode(NamedNode::new(identifier).map_err(
-            |e| anyhow!("Failed to create IRI from identifier: {e}"),
-        )?)));
+        values.push(Some(Term::NamedNode(
+            NamedNode::new(trim_identifier(&identifier))
+                .map_err(|e| anyhow!("Failed to create IRI from identifier: {e}"))?,
+        )));
         values.push(Some(Term::Literal(Literal::new_typed_literal(
             field,
             xsd::STRING,
@@ -302,7 +307,7 @@ pub async fn service(
         let mut field_term = None;
         if let MatchInfo::Field { identifier, field } = search_match.info {
             identifier_term = Some(Term::NamedNode(
-                NamedNode::new(identifier)
+                NamedNode::new(trim_identifier(&identifier))
                     .map_err(|e| anyhow!("Failed to create IRI from identifier: {e}"))?,
             ));
 
