@@ -54,6 +54,7 @@ serde-aux = "4.7.0"
 serde_plain = "1.0.2"
 image = "0.25.9"
 http = "1.4.0"
+parse-size = "1.1"
 
 [dev-dependencies]
 tempfile = "3.6"

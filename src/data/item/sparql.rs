@@ -257,7 +257,7 @@ pub fn stream_items_from_sparql_result<R: Read>(
 }
 
 pub fn stream_items_from_sparql_result_file(
-    file_path: &Path,
+    file_path: impl AsRef<Path>,
     format: SPARQLResultFormat,
     default_field_type: FieldType,
 ) -> Result<impl Iterator<Item = Result<Item>>> {
@@ -265,8 +265,11 @@ pub fn stream_items_from_sparql_result_file(
     stream_items_from_sparql_result(reader, format, default_field_type)
 }
 
-pub fn guess_sparql_result_format_from_extension(file_path: &Path) -> Result<SPARQLResultFormat> {
+pub fn guess_sparql_result_format_from_extension(
+    file_path: impl AsRef<Path>,
+) -> Result<SPARQLResultFormat> {
     let ext = file_path
+        .as_ref()
         .extension()
         .and_then(|s| s.to_str())
         .ok_or_else(|| anyhow!("File has no extension"))?

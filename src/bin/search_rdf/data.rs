@@ -49,6 +49,7 @@ fn build_data(base_dir: &Path, source: &DataSource, output: &Path) -> Result<()>
     // Get iterator of Items based on source type
     let items: Box<dyn Iterator<Item = Result<Item>>> = match source {
         DataSource::Jsonl { path } => {
+            let path = base_dir.join(path);
             info!("Streaming data from JSONL file: {}", path.display());
             Box::new(stream_items_from_jsonl_file(path)?)
         }
@@ -57,6 +58,7 @@ fn build_data(base_dir: &Path, source: &DataSource, output: &Path) -> Result<()>
             format,
             default_field_type,
         } => {
+            let path = base_dir.join(path);
             info!("Streaming data from SPARQL result file: {}", path.display());
             Box::new(stream_items_from_sparql_result_file(
                 path,
@@ -74,7 +76,7 @@ fn build_data(base_dir: &Path, source: &DataSource, output: &Path) -> Result<()>
         } => {
             let query = match (query, path) {
                 (Some(q), None) => q.clone(),
-                (None, Some(p)) => read_to_string(p)?,
+                (None, Some(p)) => read_to_string(base_dir.join(p))?,
                 _ => {
                     return Err(anyhow!(
                         "Either 'query' or 'path' must be provided, but not both."

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::data::Data as RustData;
 use crate::data::DataSource;
 use crate::data::item::jsonl::{ItemJson, stream_items_from_jsonl_file};
@@ -76,7 +78,7 @@ impl Data {
     #[staticmethod]
     pub fn build_from_jsonl(file_path: &str, data_dir: &str) -> Result<()> {
         RustData::build(
-            stream_items_from_jsonl_file(file_path.as_ref())?,
+            stream_items_from_jsonl_file(Path::new(file_path))?,
             data_dir.as_ref(),
         )
     }
@@ -91,10 +93,10 @@ impl Data {
     ) -> Result<()> {
         let format = match format {
             Some(f) => f,
-            None => guess_sparql_result_format_from_extension(file_path.as_ref())?,
+            None => guess_sparql_result_format_from_extension(Path::new(file_path))?,
         };
         RustData::build(
-            stream_items_from_sparql_result_file(file_path.as_ref(), format, default_field_type)?,
+            stream_items_from_sparql_result_file(Path::new(file_path), format, default_field_type)?,
             data_dir.as_ref(),
         )
     }

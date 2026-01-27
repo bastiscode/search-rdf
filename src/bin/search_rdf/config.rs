@@ -162,6 +162,8 @@ pub struct ServerConfig {
     pub indices: Vec<String>,
     #[serde(default)]
     pub cors: bool,
+    #[serde(default = "default_max_input_size")]
+    pub max_input_size: String,
     #[serde(default)]
     pub sparql: Option<SparqlConfig>,
 }
@@ -172,6 +174,10 @@ fn default_host() -> String {
 
 fn default_port() -> u16 {
     8080
+}
+
+fn default_max_input_size() -> String {
+    "100MB".to_string()
 }
 
 impl Config {

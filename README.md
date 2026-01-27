@@ -215,13 +215,14 @@ Configures the HTTP server for serving indices.
 
 ```yaml
 server:
-  host: 0.0.0.0                # Bind address (default: 127.0.0.1)
-  port: 8080                   # Port (default: 8080)
-  cors: true                   # Enable CORS (default: false)
-  indices:                     # Indices to serve
+  host: 0.0.0.0                 # Bind address (default: 127.0.0.1)
+  port: 8080                    # Port (default: 8080)
+  cors: true                    # Enable CORS (default: false)
+  max_input_size: 100MB         # Max request size in bytes (default: 100MB)
+  indices:                      # Indices to serve
     - keyword-index
     - embedding-index
-  sparql:                      # Optional: Enable SPARQL service endpoints
+  sparql:                       # Optional: Enable SPARQL service endpoints
     prefix: "http://example.org/"
 ```
 
@@ -255,6 +256,7 @@ Content-Type: application/json
 The request body contains a `queries` array and search parameters. Query format depends on the index type:
 
 **Text queries** (for keyword, full-text, and text embedding indices):
+
 ```json
 {
   "queries": [{"type": "text", "value": "search query"}],
@@ -263,6 +265,7 @@ The request body contains a `queries` array and search parameters. Query format 
 ```
 
 **Image URL queries** (for image embedding indices):
+
 ```json
 {
   "queries": [{"type": "url", "value": "https://example.com/image.jpg"}],
@@ -271,6 +274,7 @@ The request body contains a `queries` array and search parameters. Query format 
 ```
 
 **Pre-computed embedding queries**:
+
 ```json
 {
   "queries": [{"type": "embedding", "value": [0.1, 0.2, 0.3, ...]}],
@@ -281,9 +285,11 @@ The request body contains a `queries` array and search parameters. Query format 
 Search parameters vary by index type:
 
 **Keyword/Full-text indices:**
+
 - `k` - Number of results (default: 10)
 
 **Embedding indices:**
+
 - `k` - Number of results (default: 10)
 - `min-score` - Minimum similarity score filter
 - `exact` - Use exact search instead of approximate (default: false)

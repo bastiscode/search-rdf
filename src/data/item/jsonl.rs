@@ -33,7 +33,7 @@ pub fn stream_items_from_jsonl<R: Read>(reader: R) -> Result<impl Iterator<Item 
 }
 
 pub fn stream_items_from_jsonl_file(
-    file_path: &Path,
+    file_path: impl AsRef<Path>,
 ) -> Result<impl Iterator<Item = Result<Item>>> {
     let reader = BufReader::new(File::open(file_path)?);
     stream_items_from_jsonl(reader)

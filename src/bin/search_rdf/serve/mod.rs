@@ -10,6 +10,7 @@ use axum::{
     routing::{get, post},
 };
 use log::info;
+use parse_size::parse_size;
 use std::{collections::HashMap, path::Path};
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
@@ -73,9 +74,11 @@ pub async fn run(config_path: &Path) -> Result<()> {
     info!("GET  /indices");
     info!("POST /search/{{index}}");
 
+    let body_limit: usize = parse_size(&server.max_input_size)?.try_into()?;
+
     // Build router
     let mut app = Router::new()
-        .layer(DefaultBodyLimit::max(1024 * 1024 * 1024)) // 1 GB
+        .layer(DefaultBodyLimit::max(body_limit))
         .route("/health", get(health))
         .route("/indices", get(list_indices))
         .route("/search/{index}", post(search));
