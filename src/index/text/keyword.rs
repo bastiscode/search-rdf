@@ -377,20 +377,22 @@ impl KeywordIndex {
         };
 
         let query = normalize(query);
-        let keywords: Vec<_> = query.split_whitespace().collect();
+        let mut keywords: Vec<_> = query.split_whitespace().collect();
         let num_keywords = keywords.len();
 
         let mut items: HashMap<u32, Item> = HashMap::new();
 
-        let keyword_matches: Vec<_> = keywords
+        let keyword_matches: HashMap<_, _> = keywords
             .iter()
-            .map(|kw| self.get_matches(kw))
-            // most selective first
-            .sorted_by_cached_key(|inv_lists| {
+            .unique()
+            .map(|&kw| {
+                let inv_lists = self.get_matches(kw);
                 let total_length: usize = inv_lists.iter().map(|inv_list| inv_list.length).sum();
-                total_length
+                (kw, (inv_lists, total_length))
             })
             .collect();
+
+        keywords.sort_by_key(|kw| keyword_matches[kw].1);
 
         let mut top_k: BTreeSet<Candidate> = BTreeSet::new();
 
@@ -406,7 +408,8 @@ impl KeywordIndex {
 
         let mut skip = HashSet::new();
 
-        for (keyword, inv_lists) in keyword_matches.into_iter().enumerate() {
+        for (keyword, kw) in keywords.into_iter().enumerate() {
+            let (inv_lists, _) = &keyword_matches[kw];
             let keywords_left = num_keywords - keyword - 1;
             let max_future_score = Item::ES * keywords_left as f32;
 
