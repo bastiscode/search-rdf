@@ -77,6 +77,17 @@ pub fn load_usize_vec_from_u64(path: &Path) -> Result<Vec<usize>> {
 }
 
 pub fn progress_bar(message: &str, total: Option<u64>) -> Result<ProgressBar> {
+    // Only show progress bars if SEARCH_RDF_PROGRESS environment variable is set
+    let show_progress = std::env::var("SEARCH_RDF_PROGRESS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+        .unwrap_or(false);
+
+    if !show_progress {
+        // Return a completely hidden progress bar
+        return Ok(ProgressBar::hidden());
+    }
+
+    // Create a visible progress bar with styling
     let pb = if let Some(total) = total {
         ProgressBar::new(total).with_style(
             ProgressStyle::with_template(

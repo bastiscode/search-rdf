@@ -287,17 +287,21 @@ impl EmbeddingIndex {
         let num_dimensions = index.dimensions();
         let search_k = params.search_k(data);
 
+        // Use exact search for filtered queries to avoid the severe performance penalty
+        // of HNSW graph traversal with predicates (30x+ slower than linear scan)
         let results = if is_binary {
             let binary_emb = binary_quantization(embedding)?;
             let embedding = b1x8::from_u8s(&binary_emb);
 
             if let Some(ref pred) = filter {
-                index.filtered_search(embedding, search_k, pred)?
+                // Always use exact=true for filtered search
+                index.filtered_search(embedding, search_k, pred, true)?
             } else {
                 index.search(embedding, search_k)?
             }
         } else if let Some(ref pred) = filter {
-            index.filtered_search(embedding, search_k, pred)?
+            // Always use exact=true for filtered search
+            index.filtered_search(embedding, search_k, pred, true)?
         } else {
             index.search(embedding, search_k)?
         };
