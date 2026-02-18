@@ -1,4 +1,4 @@
-"""Type stubs for search_index module."""
+"""Type stubs for search_rdf module."""
 
 from typing import Any, Iterator, final
 

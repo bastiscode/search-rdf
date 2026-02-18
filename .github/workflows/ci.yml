@@ -1,0 +1,74 @@
+name: Build and test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: "Rust: Check and test"
+        run: |
+          cargo fmt --all -- --check
+          cargo check
+          cargo clippy -- -D warnings
+          cargo test
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          manylinux: auto
+          args: --release --out dist
+      - name: "Python: Install wheels and test import"
+        run: |
+          pip install dist/*.whl --force-reinstall
+          python -c "import search_rdf"
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: "Rust: Test"
+        run: cargo test
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          args: --release --out dist
+      - name: "Python: Install wheels and test import"
+        shell: bash
+        run: |
+          pip install dist/*.whl --force-reinstall
+          python -c "import search_rdf"
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: "Rust: Test"
+        run: cargo test
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          args: --release --out dist
+      - name: "Python: Install wheels and test import"
+        shell: bash
+        run: |
+          pip install dist/*.whl --force-reinstall
+          python -c "import search_rdf"

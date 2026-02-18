@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 itertools = "0.14"
 serde = { version = "1.0", features = ["derive", "rc"] }
-serde_with = "3.11"
+serde_with = "3.16"
 
 [dev-dependencies]
 criterion = "0.5"
