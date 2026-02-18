@@ -4,6 +4,7 @@ from search_rdf._internal import (
     Data,
     EmbeddingIndex,
     KeywordIndex,
+    embedding_index_hardware_acceleration,
 )
 
 try:
@@ -15,4 +16,5 @@ __all__ = [
     "Data",
     "EmbeddingIndex",
     "KeywordIndex",
+    "embedding_index_hardware_acceleration",
 ]

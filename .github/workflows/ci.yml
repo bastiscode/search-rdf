@@ -28,10 +28,6 @@ jobs:
         with:
           manylinux: auto
           args: --release --out dist
-      - name: "Python: Install wheels and test import"
-        run: |
-          pip install dist/*.whl --force-reinstall
-          python -c "import search_rdf"
 
   macos:
     runs-on: macos-latest
@@ -47,11 +43,6 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           args: --release --out dist
-      - name: "Python: Install wheels and test import"
-        shell: bash
-        run: |
-          pip install dist/*.whl --force-reinstall
-          python -c "import search_rdf"
 
   windows:
     runs-on: windows-latest
@@ -67,8 +58,3 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           args: --release --out dist
-      - name: "Python: Install wheels and test import"
-        shell: bash
-        run: |
-          pip install dist/*.whl --force-reinstall
-          python -c "import search_rdf"

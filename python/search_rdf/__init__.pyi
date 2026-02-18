@@ -243,8 +243,19 @@ class EmbeddingIndex:
         """
         ...
 
+def embedding_index_hardware_acceleration() -> str:
+    """
+    Get the SIMD backend used for embedding index operations.
+
+    Returns:
+        SIMD backend name (e.g., "haswell", "skylake", "ice", "genoa", "sapphire",
+        "neon", "sve", etc.)
+    """
+    ...
+
 __all__ = [
     "Data",
     "EmbeddingIndex",
     "KeywordIndex",
+    "embedding_index_hardware_acceleration",
 ]
