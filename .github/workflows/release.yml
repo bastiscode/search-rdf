@@ -21,7 +21,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          manylinux: auto
+          manylinux: 2_28  # Use newer manylinux with updated compiler for better SIMD support
           args: --release --out dist
       - name: Upload wheels
         uses: actions/upload-artifact@v4
