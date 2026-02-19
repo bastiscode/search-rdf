@@ -3,6 +3,7 @@ from importlib import metadata
 from search_rdf._internal import (
     Data,
     EmbeddingIndex,
+    FuzzyIndex,
     KeywordIndex,
     embedding_index_hardware_acceleration,
 )
@@ -15,6 +16,7 @@ except metadata.PackageNotFoundError:
 __all__ = [
     "Data",
     "EmbeddingIndex",
+    "FuzzyIndex",
     "KeywordIndex",
     "embedding_index_hardware_acceleration",
 ]

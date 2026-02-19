@@ -30,6 +30,7 @@ pub async fn list_indices(State(state): State<AppState>) -> Json<Vec<IndexInfo>>
             index_type: index.index_type().to_string(),
             query_types: match index {
                 SearchIndex::Keyword(..) => vec!["text"],
+                SearchIndex::Fuzzy(..) => vec!["text"],
                 SearchIndex::FullText(..) => vec!["text"],
                 SearchIndex::Embedding(..) => vec!["embedding"],
                 SearchIndex::EmbeddingWithData(..) => vec!["text", "embedding"],

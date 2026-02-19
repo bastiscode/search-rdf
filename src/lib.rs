@@ -31,6 +31,7 @@ fn _internal(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Add index classes
     m.add_class::<index::text::python::KeywordIndex>()?;
+    m.add_class::<index::text::python::FuzzyIndex>()?;
     m.add_class::<index::python::EmbeddingIndex>()?;
 
     // Add SIMD detection function

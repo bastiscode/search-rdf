@@ -15,6 +15,7 @@ use search_rdf::{
     },
     index::{
         Search,
+        text::fuzzy::{FuzzyIndex, FuzzySearchParams},
         text::keyword::{KeywordIndex, KeywordSearchParams},
     },
 };
@@ -195,6 +196,83 @@ fn bench_keyword_index(c: &mut Criterion) {
     g.finish();
 }
 
+fn bench_fuzzy_index(c: &mut Criterion) {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let base_dir = Path::new(dir).join("benches");
+    let tsv_file = base_dir.join("data.tsv");
+    let data_dir = base_dir.join("data");
+    let index_dir = base_dir.join("fuzzy_index");
+
+    // create index dir if it doesn't exist
+    create_dir_all(&index_dir).expect("Failed to create index dir");
+
+    println!(
+        "Building fuzzy index at {} from {}",
+        index_dir.display(),
+        tsv_file.display()
+    );
+
+    let items = read_tsv_items(&tsv_file).expect("Failed to read TSV items");
+    Data::build(items.into_iter().map(Ok), &data_dir).expect("Failed to build data");
+    let data = Data::load(&data_dir).expect("Failed to load data");
+
+    FuzzyIndex::build(&data, &index_dir, &()).expect("Failed to build index");
+
+    let index = FuzzyIndex::load(data, &index_dir).expect("Failed to load index");
+
+    let mut g = c.benchmark_group("fuzzy_index");
+
+    let queries = vec!["the united states", "angela m"];
+    let ks = vec![10, 100];
+
+    let filter = |id: u32| id.is_multiple_of(2);
+
+    for query in queries {
+        for &k in &ks {
+            for &exact in &[true, false] {
+                g.bench_function(
+                    format!("search: query={query}, k={k}, exact={exact}"),
+                    |b| {
+                        b.iter(|| {
+                            let _ = index
+                                .search(
+                                    query,
+                                    &FuzzySearchParams {
+                                        k,
+                                        exact,
+                                        ..Default::default()
+                                    },
+                                )
+                                .expect("Failed to find matches");
+                        })
+                    },
+                );
+
+                g.bench_function(
+                    format!("search_with_filter: query={query}, k={k}, exact={exact}"),
+                    |b| {
+                        b.iter(|| {
+                            let _ = index
+                                .search_with_filter(
+                                    query,
+                                    &FuzzySearchParams {
+                                        k,
+                                        exact,
+                                        ..Default::default()
+                                    },
+                                    filter,
+                                )
+                                .expect("Failed to find matches");
+                        })
+                    },
+                );
+            }
+        }
+    }
+
+    g.finish();
+}
+
 fn bench_map_comparison(c: &mut Criterion) {
     use tempfile::tempdir;
 
@@ -319,6 +397,7 @@ fn bench_map_comparison(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_keyword_index,
+    bench_fuzzy_index,
     bench_data,
     bench_map_comparison
 );

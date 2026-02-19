@@ -46,7 +46,7 @@ impl EmbeddingIndex {
     #[staticmethod]
     #[pyo3(signature = (data, embedding_path, index_dir, metric=None, precision=None))]
     pub fn build(
-        data: Data,
+        data: &Data,
         embedding_path: &str,
         index_dir: &str,
         metric: Option<Metric>,
@@ -61,13 +61,13 @@ impl EmbeddingIndex {
             params = params.with_metric(metric);
         };
 
-        let data = EmbeddingsWithData::load(data.inner, embedding_path.as_ref())?;
+        let data = EmbeddingsWithData::load(data.inner.clone(), embedding_path.as_ref())?;
         EmbeddingIndexWithData::build(&data, index_dir.as_ref(), &params)
     }
 
     #[staticmethod]
-    pub fn load(data: Data, embedding_path: &str, index_dir: &str) -> Result<Self> {
-        let data = EmbeddingsWithData::load(data.inner, embedding_path.as_ref())?;
+    pub fn load(data: &Data, embedding_path: &str, index_dir: &str) -> Result<Self> {
+        let data = EmbeddingsWithData::load(data.inner.clone(), embedding_path.as_ref())?;
         let inner = EmbeddingIndexWithData::load(data, index_dir.as_ref())?;
         Ok(Self { inner })
     }

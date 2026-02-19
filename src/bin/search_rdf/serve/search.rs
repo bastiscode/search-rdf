@@ -184,6 +184,21 @@ pub async fn perform_search_with_filter(
             })
             .await
         }
+        SearchIndex::Fuzzy(index) => {
+            let SearchParams::Fuzzy(search_params) = params else {
+                return Err(anyhow!("Invalid search parameters for fuzzy index"));
+            };
+
+            search_parallel(queries, move |query| {
+                let Query::Text(query) = query else {
+                    return Err(anyhow!("Non-text query provided to fuzzy index"));
+                };
+                let matches =
+                    index.search_with_filter(query.as_str(), &search_params, filter.clone())?;
+                convert_to_search_matches(matches, index.data())
+            })
+            .await
+        }
         SearchIndex::FullText(index) => {
             let SearchParams::FullText(search_params) = params else {
                 return Err(anyhow!("Invalid search parameters for full-text index"));
@@ -240,6 +255,20 @@ pub async fn perform_search(
             search_parallel(queries, move |query| {
                 let Query::Text(query) = query else {
                     return Err(anyhow!("Non-text query provided to keyword index"));
+                };
+                let matches = index.search(query.as_str(), &search_params)?;
+                convert_to_search_matches(matches, index.data())
+            })
+            .await
+        }
+        SearchIndex::Fuzzy(index) => {
+            let SearchParams::Fuzzy(search_params) = params else {
+                return Err(anyhow!("Invalid search parameters for fuzzy index"));
+            };
+
+            search_parallel(queries, move |query| {
+                let Query::Text(query) = query else {
+                    return Err(anyhow!("Non-text query provided to fuzzy index"));
                 };
                 let matches = index.search(query.as_str(), &search_params)?;
                 convert_to_search_matches(matches, index.data())

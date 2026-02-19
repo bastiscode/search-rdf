@@ -33,17 +33,22 @@ pub fn normalize(s: &str) -> String {
     };
     // remove all punctuation characters around words
     // but keep punctuation inside words and words containing only punctuation
+    // then split on internal delimiters (: / ( ) [ ])
     norm.split_whitespace()
-        .map(|word| {
+        .flat_map(|word| {
             let trimmed = word
                 .trim_end_matches(|c: char| c.is_ascii_punctuation())
                 .trim_start_matches(|c: char| c.is_ascii_punctuation());
             // only punctuation
-            if trimmed.is_empty() {
+            let base = if trimmed.is_empty() {
                 word.to_string()
             } else {
                 trimmed.to_string()
-            }
+            };
+            base.split([':', '/', '(', ')', '[', ']'])
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect::<Vec<_>>()
         })
         .join(" ")
 }
@@ -859,9 +864,16 @@ mod tests {
         assert_eq!(normalize("Hello, World!"), "hello world");
         assert_eq!(normalize("(Hello) [World]"), "hello world");
 
-        // keep punctuation inside words
+        // keep punctuation inside words (hyphens, apostrophes)
         assert_eq!(normalize("it's a test"), "it's a test");
         assert_eq!(normalize("semi-automated"), "semi-automated");
+
+        // split on internal delimiters
+        assert_eq!(normalize("Category:Dogs"), "category dogs");
+        assert_eq!(normalize("foo/bar"), "foo bar");
+        assert_eq!(normalize("Category:Secretaries"), "category secretaries");
+        assert_eq!(normalize("a(b)c"), "a b c");
+        assert_eq!(normalize("x[y]z"), "x y z");
 
         // handle words with only punctuation
         assert_eq!(normalize("Hello --- World"), "hello --- world");

@@ -86,6 +86,7 @@ fn search_match_to_solution(
 fn get_id_from_identifier(index: &SearchIndex, identifier: &str) -> Option<u32> {
     match index {
         SearchIndex::Keyword(idx) => idx.data().id_from_identifier(identifier),
+        SearchIndex::Fuzzy(idx) => idx.data().id_from_identifier(identifier),
         SearchIndex::EmbeddingWithData(idx) => idx.data().data().id_from_identifier(identifier),
         _ => None,
     }

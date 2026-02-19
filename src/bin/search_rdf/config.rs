@@ -120,6 +120,9 @@ pub enum IndexType {
     Keyword {
         data: PathBuf,
     },
+    Fuzzy {
+        data: PathBuf,
+    },
     FullText {
         data: PathBuf,
     },

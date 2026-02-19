@@ -2,10 +2,10 @@
 
 import numpy as np
 import torch
-from torch.nn import functional as F
 from sentence_transformers import SentenceTransformer
-from transformers import AutoImageProcessor, AutoModel
+from torch.nn import functional as F
 from tqdm import trange
+from transformers import AutoImageProcessor, AutoModel
 
 
 class TextEmbeddingModel:

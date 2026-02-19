@@ -10,6 +10,7 @@ use std::path::Path;
 pub use embedding::EmbeddingIndexWithData;
 pub use embedding::{EmbeddingIndex, EmbeddingIndexParams, EmbeddingSearchParams, Metric};
 pub use text::full_text::{FullTextIndex, FullTextSearchParams};
+pub use text::fuzzy::{FuzzyIndex, FuzzySearchParams};
 pub use text::keyword::{KeywordIndex, KeywordSearchParams};
 
 /// Result from a search query

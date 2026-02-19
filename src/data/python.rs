@@ -12,7 +12,6 @@ use anyhow::{Result, anyhow};
 use pyo3::prelude::*;
 use pythonize::depythonize;
 
-#[derive(Clone)]
 #[pyclass]
 pub struct Data {
     pub inner: RustData,

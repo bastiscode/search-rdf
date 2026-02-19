@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use log::info;
 use search_rdf::index::EmbeddingSearchParams;
 use search_rdf::index::FullTextSearchParams;
+use search_rdf::index::FuzzySearchParams;
 use search_rdf::index::KeywordSearchParams;
 use serde::Deserialize;
 use serde::de::{IntoDeserializer, value};
@@ -12,7 +13,7 @@ use search_rdf::data::DataSource;
 use search_rdf::data::embedding::Embeddings;
 use search_rdf::data::{Data, EmbeddingsWithData};
 use search_rdf::index::{EmbeddingIndex, EmbeddingIndexParams, EmbeddingIndexWithData, Search};
-use search_rdf::index::{FullTextIndex, KeywordIndex};
+use search_rdf::index::{FullTextIndex, FuzzyIndex, KeywordIndex};
 
 use crate::search_rdf::config::{Config, IndexType};
 
@@ -20,6 +21,7 @@ use crate::search_rdf::config::{Config, IndexType};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SearchParams {
     Keyword(KeywordSearchParams),
+    Fuzzy(FuzzySearchParams),
     #[serde(rename = "full-text")]
     FullText(FullTextSearchParams),
     #[serde(rename = "embedding", alias = "embedding-with-data")]
@@ -40,6 +42,7 @@ impl TryFrom<HashMap<String, String>> for SearchParams {
 #[derive(Debug, Clone)]
 pub enum SearchIndex {
     Keyword(KeywordIndex),
+    Fuzzy(FuzzyIndex),
     FullText(FullTextIndex),
     EmbeddingWithData(EmbeddingIndexWithData),
     Embedding(EmbeddingIndex),
@@ -49,6 +52,7 @@ impl SearchIndex {
     pub fn index_type(&self) -> &'static str {
         match self {
             SearchIndex::Keyword(index) => index.index_type(),
+            SearchIndex::Fuzzy(index) => index.index_type(),
             SearchIndex::FullText(index) => index.index_type(),
             SearchIndex::EmbeddingWithData(index) => index.index_type(),
             SearchIndex::Embedding(index) => index.index_type(),
@@ -95,6 +99,7 @@ pub fn run(config_path: &Path, force: bool) -> Result<()> {
 fn build_index(base_dir: &Path, index_type: &IndexType, index_dir: &Path) -> Result<()> {
     match index_type {
         IndexType::Keyword { data } => build_keyword_index(base_dir, data, index_dir),
+        IndexType::Fuzzy { data } => build_fuzzy_index(base_dir, data, index_dir),
         IndexType::FullText { data } => build_full_text_index(base_dir, data, index_dir),
         IndexType::EmbeddingWithData {
             data,
@@ -121,6 +126,11 @@ pub fn load_index(
             let text_data = Data::load(&base_dir.join(data))?;
             let index = KeywordIndex::load(text_data, &index_dir)?;
             Ok(SearchIndex::Keyword(index))
+        }
+        IndexType::Fuzzy { data } => {
+            let text_data = Data::load(&base_dir.join(data))?;
+            let index = FuzzyIndex::load(text_data, &index_dir)?;
+            Ok(SearchIndex::Fuzzy(index))
         }
         IndexType::FullText { data } => {
             let data = Data::load(&base_dir.join(data))?;
@@ -159,6 +169,24 @@ fn build_keyword_index(base_dir: &Path, data_path: &Path, output_path: &Path) ->
     );
 
     KeywordIndex::build(&data, &output_path, &())?;
+
+    Ok(())
+}
+
+fn build_fuzzy_index(base_dir: &Path, data_path: &Path, output_path: &Path) -> Result<()> {
+    let data_path = base_dir.join(data_path);
+    let output_path = base_dir.join(output_path);
+
+    let data = Data::load(&data_path)
+        .context(format!("Failed to load data from: {}", data_path.display()))?;
+
+    info!(
+        "Loaded {} items with {} fields",
+        data.len(),
+        data.total_fields()
+    );
+
+    FuzzyIndex::build(&data, &output_path, &())?;
 
     Ok(())
 }

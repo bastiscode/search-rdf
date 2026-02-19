@@ -190,10 +190,8 @@ impl Data {
 
         // Load the appropriate map type based on which file exists
         let identifier_map = if fst_map_file.exists() {
-            info!("Loading FstMap identifier map");
             IdentifierMap::Fst(FstMap::load(&fst_map_file)?)
         } else if trie_map_file.exists() {
-            info!("Loading TrieMap identifier map");
             IdentifierMap::Trie(TrieMap::load(&trie_map_file)?)
         } else {
             return Err(anyhow!(
