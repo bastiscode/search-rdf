@@ -1,6 +1,6 @@
 [package]
 name = "search-rdf"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 publish = false
 
@@ -33,6 +33,7 @@ pyo3 = { version = "0.27", features = [
 pythonize = "0.27"
 numpy = "0.27"
 byte-trie = { path = "./byte-trie" }
+fst = "0.4"
 sparesults = "0.3"
 spargebra = "0.4"
 oxrdf = "0.3"

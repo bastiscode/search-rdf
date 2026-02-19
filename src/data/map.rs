@@ -1,7 +1,9 @@
 use anyhow::{Result, anyhow};
 use byte_trie::{AdaptiveRadixTrie, PrefixSearch};
+use fst::Map;
+use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
-use std::{ops::Range, path::Path};
+use std::{fs::File, ops::Range, path::Path};
 
 use crate::utils::{load_bincode, write_bincode};
 
@@ -55,6 +57,134 @@ impl TrieMap {
         I: AsRef<str>,
     {
         self.trie.get(identifier.as_ref().as_bytes()).copied()
+    }
+}
+
+#[derive(Debug)]
+enum FstMapState {
+    Building(Vec<(String, u32)>),
+    Loaded(Map<Mmap>),
+}
+
+/// A memory-mapped FST-based map for string identifiers to u32 values.
+/// This is more memory-efficient than TrieMap but slightly slower for lookups.
+///
+/// Usage:
+/// - Create with `new()` and use `add()` to build the map
+/// - Call `save()` to persist to disk
+/// - Use `load()` to create a memory-mapped instance from disk
+/// - Once loaded, the map is immutable (cannot add more items)
+#[derive(Debug)]
+pub struct FstMap {
+    state: FstMapState,
+}
+
+impl Default for FstMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FstMap {
+    /// Create a new FST map in building mode.
+    pub fn new() -> Self {
+        Self {
+            state: FstMapState::Building(Vec::new()),
+        }
+    }
+
+    /// Add an identifier with its ID.
+    /// Only works when in building mode (not after loading from disk).
+    /// Duplicates are checked when save() is called.
+    pub fn add<I>(&mut self, identifier: I, id: u32) -> Result<()>
+    where
+        I: AsRef<str>,
+    {
+        match &mut self.state {
+            FstMapState::Building(items) => {
+                items.push((identifier.as_ref().to_string(), id));
+                Ok(())
+            }
+            FstMapState::Loaded(_) => Err(anyhow!(
+                "Cannot add to a loaded FstMap. The FST is immutable once loaded."
+            )),
+        }
+    }
+
+    /// Save the FST to a file.
+    /// Only works when in building mode.
+    /// Items are automatically sorted and checked for duplicates before writing.
+    pub fn save(&self, path: &Path) -> Result<()> {
+        match &self.state {
+            FstMapState::Building(items) => {
+                // Sort items by key
+                let mut sorted_items = items.clone();
+                sorted_items.sort_by(|a, b| a.0.cmp(&b.0));
+
+                // Check for duplicates
+                for i in 1..sorted_items.len() {
+                    if sorted_items[i].0 == sorted_items[i - 1].0 {
+                        return Err(anyhow!("duplicate identifier found: {}", sorted_items[i].0));
+                    }
+                }
+
+                let file = File::create(path)?;
+                let mut builder = fst::MapBuilder::new(file)?;
+
+                for (key, value) in &sorted_items {
+                    builder.insert(key.as_bytes(), *value as u64)?;
+                }
+
+                builder.finish()?;
+                Ok(())
+            }
+            FstMapState::Loaded(_) => Err(anyhow!(
+                "Cannot save a loaded FstMap. It's already persisted to disk."
+            )),
+        }
+    }
+
+    /// Load a memory-mapped FST from a file.
+    pub fn load(path: &Path) -> Result<Self> {
+        let file = File::open(path)?;
+        let mmap = unsafe { Mmap::map(&file)? };
+        let map = Map::new(mmap)?;
+        Ok(Self {
+            state: FstMapState::Loaded(map),
+        })
+    }
+
+    /// Get the ID for a given identifier.
+    /// Works in both building and loaded modes.
+    /// In building mode, performs linear search (slower).
+    /// In loaded mode, uses FST lookup (faster, memory-efficient).
+    pub fn get<I>(&self, identifier: I) -> Option<u32>
+    where
+        I: AsRef<str>,
+    {
+        match &self.state {
+            FstMapState::Building(items) => items
+                .iter()
+                .find(|(k, _)| k == identifier.as_ref())
+                .map(|(_, v)| *v),
+            FstMapState::Loaded(map) => map.get(identifier.as_ref().as_bytes()).map(|v| v as u32),
+        }
+    }
+
+    /// Get the number of entries in the map.
+    pub fn len(&self) -> usize {
+        match &self.state {
+            FstMapState::Building(items) => items.len(),
+            FstMapState::Loaded(map) => map.len(),
+        }
+    }
+
+    /// Check if the map is empty.
+    pub fn is_empty(&self) -> bool {
+        match &self.state {
+            FstMapState::Building(items) => items.is_empty(),
+            FstMapState::Loaded(map) => map.is_empty(),
+        }
     }
 }
 
@@ -533,5 +663,140 @@ mod tests {
         assert_eq!(map.range(0), None);
         assert_eq!(map.total_count, 0);
         assert_eq!(map.max_count, 0);
+    }
+
+    #[test]
+    fn test_fst_map_basic() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let path = temp_dir.path().join("fst-map.bin");
+
+        let mut map = super::FstMap::new();
+        map.add("Q1", 0).expect("Failed to add");
+        map.add("Q2", 1).expect("Failed to add");
+        map.add("Q100", 100).expect("Failed to add");
+
+        assert_eq!(map.len(), 3);
+        assert!(!map.is_empty());
+
+        // Test get in building mode
+        assert_eq!(map.get("Q1"), Some(0));
+        assert_eq!(map.get("Q2"), Some(1));
+
+        map.save(&path).expect("Failed to save");
+
+        let loaded_map = super::FstMap::load(&path).expect("Failed to load");
+
+        assert_eq!(loaded_map.len(), 3);
+        assert!(!loaded_map.is_empty());
+        assert_eq!(loaded_map.get("Q1"), Some(0));
+        assert_eq!(loaded_map.get("Q2"), Some(1));
+        assert_eq!(loaded_map.get("Q100"), Some(100));
+        assert_eq!(loaded_map.get("Q999"), None);
+    }
+
+    #[test]
+    fn test_fst_map_duplicate_identifier() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let path = temp_dir.path().join("fst-map-dup.bin");
+
+        let mut map = super::FstMap::new();
+        map.add("Q1", 0).expect("Failed to add");
+        map.add("Q1", 1).expect("Failed to add"); // No error yet
+
+        // Error should occur during save
+        let result = map.save(&path);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate identifier")
+        );
+    }
+
+    #[test]
+    fn test_fst_map_auto_sort() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let path = temp_dir.path().join("fst-map-sort.bin");
+
+        let mut map = super::FstMap::new();
+        // Add in non-sorted order
+        map.add("Charlie", 2).expect("Failed to add");
+        map.add("Alice", 0).expect("Failed to add");
+        map.add("Bob", 1).expect("Failed to add");
+
+        map.save(&path).expect("Failed to save");
+
+        let loaded_map = super::FstMap::load(&path).expect("Failed to load");
+
+        assert_eq!(loaded_map.get("Alice"), Some(0));
+        assert_eq!(loaded_map.get("Bob"), Some(1));
+        assert_eq!(loaded_map.get("Charlie"), Some(2));
+    }
+
+    #[test]
+    fn test_fst_map_empty() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let path = temp_dir.path().join("fst-map-empty.bin");
+
+        let map = super::FstMap::new();
+        assert_eq!(map.len(), 0);
+        assert!(map.is_empty());
+
+        map.save(&path).expect("Failed to save");
+
+        let loaded_map = super::FstMap::load(&path).expect("Failed to load");
+        assert_eq!(loaded_map.len(), 0);
+        assert!(loaded_map.is_empty());
+        assert_eq!(loaded_map.get("anything"), None);
+    }
+
+    #[test]
+    fn test_fst_map_large_ids() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let path = temp_dir.path().join("fst-map-large.bin");
+
+        let mut map = super::FstMap::new();
+        map.add("max", u32::MAX).expect("Failed to add");
+        map.add("zero", 0).expect("Failed to add");
+
+        map.save(&path).expect("Failed to save");
+
+        let loaded_map = super::FstMap::load(&path).expect("Failed to load");
+        assert_eq!(loaded_map.get("max"), Some(u32::MAX));
+        assert_eq!(loaded_map.get("zero"), Some(0));
+    }
+
+    #[test]
+    fn test_fst_map_cannot_add_after_load() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let path = temp_dir.path().join("fst-map-immutable.bin");
+
+        let mut map = super::FstMap::new();
+        map.add("Q1", 0).expect("Failed to add");
+        map.save(&path).expect("Failed to save");
+
+        let mut loaded_map = super::FstMap::load(&path).expect("Failed to load");
+        let result = loaded_map.add("Q2", 1);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("immutable"));
+    }
+
+    #[test]
+    fn test_fst_map_cannot_save_after_load() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let path = temp_dir.path().join("fst-map-no-save.bin");
+        let path2 = temp_dir.path().join("fst-map-no-save-2.bin");
+
+        let mut map = super::FstMap::new();
+        map.add("Q1", 0).expect("Failed to add");
+        map.save(&path).expect("Failed to save");
+
+        let loaded_map = super::FstMap::load(&path).expect("Failed to load");
+        let result = loaded_map.save(&path2);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("persisted"));
     }
 }

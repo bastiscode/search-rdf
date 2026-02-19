@@ -11,7 +11,7 @@ use search_rdf::{
     data::{
         Data, DataSource,
         item::{FieldType, Item, StringField},
-        map::{OrderedDataMap, TrieMap},
+        map::{FstMap, OrderedDataMap, TrieMap},
     },
     index::{
         Search,
@@ -80,7 +80,7 @@ fn bench_data(c: &mut Criterion) {
     // Benchmark load of TrieMap
     g.bench_function("load_trie_map", |b| {
         b.iter(|| {
-            let _ = TrieMap::load(&data_dir.join("identifier-map.bin"))
+            let _ = TrieMap::load(&data_dir.join("identifier-map.trie.bin"))
                 .expect("Failed to load trie map");
         })
     });
@@ -195,5 +195,131 @@ fn bench_keyword_index(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_keyword_index, bench_data);
+fn bench_map_comparison(c: &mut Criterion) {
+    use tempfile::tempdir;
+
+    let mut g = c.benchmark_group("map_comparison");
+
+    // Test with different dataset sizes
+    let sizes = [1_000, 10_000, 100_000];
+
+    for &size in &sizes {
+        // Generate test data
+        let identifiers: Vec<String> = (0..size).map(|i| format!("Q{}", i)).collect();
+
+        // Benchmark TrieMap building
+        g.bench_function(format!("trie_map_build_{}", size), |b| {
+            b.iter(|| {
+                let mut map = TrieMap::new();
+                for (id, identifier) in identifiers.iter().enumerate() {
+                    map.add(identifier, id as u32).unwrap();
+                }
+                map
+            })
+        });
+
+        // Benchmark FstMap building
+        g.bench_function(format!("fst_map_build_{}", size), |b| {
+            b.iter(|| {
+                let mut map = FstMap::new();
+                for (id, identifier) in identifiers.iter().enumerate() {
+                    map.add(identifier, id as u32).unwrap();
+                }
+                map
+            })
+        });
+
+        // Build maps for save/load benchmarks
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let trie_path = temp_dir.path().join("trie.bin");
+        let fst_path = temp_dir.path().join("fst.bin");
+
+        let mut trie_map = TrieMap::new();
+        let mut fst_map = FstMap::new();
+        for (id, identifier) in identifiers.iter().enumerate() {
+            trie_map.add(identifier, id as u32).unwrap();
+            fst_map.add(identifier, id as u32).unwrap();
+        }
+
+        // Benchmark TrieMap save
+        g.bench_function(format!("trie_map_save_{}", size), |b| {
+            b.iter(|| {
+                trie_map.save(&trie_path).unwrap();
+            })
+        });
+
+        // Benchmark FstMap save
+        g.bench_function(format!("fst_map_save_{}", size), |b| {
+            b.iter(|| {
+                fst_map.save(&fst_path).unwrap();
+            })
+        });
+
+        // Save once for load benchmarks
+        trie_map.save(&trie_path).unwrap();
+        fst_map.save(&fst_path).unwrap();
+
+        // Print file sizes
+        let trie_size = std::fs::metadata(&trie_path).unwrap().len();
+        let fst_size = std::fs::metadata(&fst_path).unwrap().len();
+        println!(
+            "Size {}: TrieMap = {} bytes, FstMap = {} bytes, Ratio = {:.2}x",
+            size,
+            trie_size,
+            fst_size,
+            trie_size as f64 / fst_size as f64
+        );
+
+        // Benchmark TrieMap load
+        g.bench_function(format!("trie_map_load_{}", size), |b| {
+            b.iter(|| TrieMap::load(&trie_path).unwrap())
+        });
+
+        // Benchmark FstMap load
+        g.bench_function(format!("fst_map_load_{}", size), |b| {
+            b.iter(|| FstMap::load(&fst_path).unwrap())
+        });
+
+        // Load maps for lookup benchmarks
+        let loaded_trie = TrieMap::load(&trie_path).unwrap();
+        let loaded_fst = FstMap::load(&fst_path).unwrap();
+
+        // Benchmark lookups at different positions
+        let test_positions = [(0, "first"), (size / 2, "middle"), (size - 1, "last")];
+
+        for (pos, label) in test_positions {
+            let identifier = &identifiers[pos];
+
+            // Benchmark TrieMap get
+            g.bench_function(format!("trie_map_get_{}_{}", label, size), |b| {
+                b.iter(|| loaded_trie.get(identifier).unwrap())
+            });
+
+            // Benchmark FstMap get
+            g.bench_function(format!("fst_map_get_{}_{}", label, size), |b| {
+                b.iter(|| loaded_fst.get(identifier).unwrap())
+            });
+        }
+
+        // Benchmark get for non-existent key
+        let non_existent = format!("Q{}", size * 2);
+
+        g.bench_function(format!("trie_map_get_miss_{}", size), |b| {
+            b.iter(|| loaded_trie.get(&non_existent))
+        });
+
+        g.bench_function(format!("fst_map_get_miss_{}", size), |b| {
+            b.iter(|| loaded_fst.get(&non_existent))
+        });
+    }
+
+    g.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_keyword_index,
+    bench_data,
+    bench_map_comparison
+);
 criterion_main!(benches);

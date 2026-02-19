@@ -17,8 +17,24 @@ use memmap2::Mmap;
 
 use crate::data::{
     item::{FieldRef, FieldTag, Item, ItemRef},
-    map::{OrderedDataMap, TrieMap},
+    map::{FstMap, OrderedDataMap, TrieMap},
 };
+
+/// Enum to hold either TrieMap or FstMap
+#[derive(Debug)]
+enum IdentifierMap {
+    Trie(TrieMap),
+    Fst(FstMap),
+}
+
+impl IdentifierMap {
+    fn get(&self, identifier: &str) -> Option<u32> {
+        match self {
+            IdentifierMap::Trie(map) => map.get(identifier),
+            IdentifierMap::Fst(map) => map.get(identifier),
+        }
+    }
+}
 
 /// Core trait for data sources that can be indexed
 pub trait DataSource: Send + Sync + Clone {
@@ -70,7 +86,7 @@ pub trait DataSource: Send + Sync + Clone {
 #[derive(Debug)]
 struct Inner {
     data_map: OrderedDataMap,
-    identifier_map: TrieMap,
+    identifier_map: IdentifierMap,
     data: Mmap,
 }
 
@@ -92,7 +108,28 @@ impl Data {
         let data_file = data_dir.join("data.bin");
         let mut data = BufWriter::new(File::create(&data_file)?);
 
-        let mut identifier_map = TrieMap::new();
+        // Collect items first to determine size
+        let items: Vec<_> = items.into_iter().collect();
+        let num_items = items.len();
+
+        // Choose map type based on dataset size
+        const FST_THRESHOLD: usize = 100_000;
+        let use_fst = num_items > FST_THRESHOLD;
+
+        if use_fst {
+            info!(
+                "Using FstMap for {} identifiers (>{})",
+                num_items, FST_THRESHOLD
+            );
+        } else {
+            info!(
+                "Using TrieMap for {} identifiers (≤{})",
+                num_items, FST_THRESHOLD
+            );
+        }
+
+        let mut trie_map = if use_fst { None } else { Some(TrieMap::new()) };
+        let mut fst_map = if use_fst { Some(FstMap::new()) } else { None };
         let mut data_map = OrderedDataMap::new();
 
         let log_every = 1_000_000;
@@ -108,7 +145,11 @@ impl Data {
             let encoded = item.encode();
             data.write_all(&encoded)?;
 
-            identifier_map.add(&item.identifier, id)?;
+            if let Some(ref mut map) = trie_map {
+                map.add(&item.identifier, id)?;
+            } else if let Some(ref mut map) = fst_map {
+                map.add(&item.identifier, id)?;
+            }
             data_map.add(encoded.len(), item.num_fields())?;
 
             total_fields += item.num_fields() as u64;
@@ -120,8 +161,14 @@ impl Data {
         let data_map_file = data_dir.join("data-map.bin");
         data_map.save(&data_map_file)?;
 
-        let identifier_map_file = data_dir.join("identifier-map.bin");
-        identifier_map.save(&identifier_map_file)?;
+        // Save the appropriate map type
+        if let Some(map) = trie_map {
+            let identifier_map_file = data_dir.join("identifier-map.trie.bin");
+            map.save(&identifier_map_file)?;
+        } else if let Some(map) = fst_map {
+            let identifier_map_file = data_dir.join("identifier-map.fst.bin");
+            map.save(&identifier_map_file)?;
+        }
 
         info!(
             "Built data with {} items and {} total fields",
@@ -135,11 +182,26 @@ impl Data {
     pub fn load(data_dir: &Path) -> Result<Self> {
         let data_file = data_dir.join("data.bin");
         let data_map_file = data_dir.join("data-map.bin");
-        let identifier_map_file = data_dir.join("identifier-map.bin");
+        let trie_map_file = data_dir.join("identifier-map.trie.bin");
+        let fst_map_file = data_dir.join("identifier-map.fst.bin");
 
         let data = unsafe { Mmap::map(&File::open(&data_file)?)? };
         let data_map = OrderedDataMap::load(&data_map_file)?;
-        let identifier_map = TrieMap::load(&identifier_map_file)?;
+
+        // Load the appropriate map type based on which file exists
+        let identifier_map = if fst_map_file.exists() {
+            info!("Loading FstMap identifier map");
+            IdentifierMap::Fst(FstMap::load(&fst_map_file)?)
+        } else if trie_map_file.exists() {
+            info!("Loading TrieMap identifier map");
+            IdentifierMap::Trie(TrieMap::load(&trie_map_file)?)
+        } else {
+            return Err(anyhow!(
+                "No identifier map found at {} or {}",
+                trie_map_file.display(),
+                fst_map_file.display()
+            ));
+        };
 
         Ok(Self {
             inner: Arc::new(Inner {
