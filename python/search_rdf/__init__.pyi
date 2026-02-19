@@ -141,6 +141,77 @@ class KeywordIndex:
         ...
 
 @final
+class FuzzyIndex:
+    """Fuzzy search index for data."""
+
+    @staticmethod
+    def build(data: Data, index_dir: str) -> None:
+        """
+        Build a fuzzy search index.
+
+        Args:
+            data: Data to index
+            index_dir: Output directory for the index
+        """
+        ...
+
+    @staticmethod
+    def load(data: Data, index_dir: str) -> FuzzyIndex:
+        """
+        Load a fuzzy search index.
+
+        Args:
+            data: Data associated with the index
+            index_dir: Directory containing the index
+
+        Returns:
+            Loaded FuzzyIndex instance
+        """
+        ...
+
+    def search(
+        self,
+        query: str,
+        k: int = 10,
+        exact: bool = False,
+        min_score: float | None = None,
+        allow_ids: set[int] | None = None,
+    ) -> list[tuple[int, int, float]]:
+        """
+        Search the index with a query.
+
+        Args:
+            query: Search query string
+            k: Number of results to return (default: 10)
+            exact: Use exact search instead of approximate (default: False)
+            min_score: Minimum score threshold (optional)
+            allow_ids: Set of document IDs to filter results (optional)
+
+        Returns:
+            List of (document_id, field_index, score) tuples
+        """
+        ...
+
+    def data(self) -> Data:
+        """
+        Get the data associated with the index.
+
+        Returns:
+            Data instance
+        """
+        ...
+
+    @property
+    def index_type(self) -> str:
+        """
+        Get the type of the index.
+
+        Returns:
+            Index type as a string
+        """
+        ...
+
+@final
 class EmbeddingIndex:
     """Embedding-based search index for data."""
 
@@ -256,6 +327,7 @@ def embedding_index_hardware_acceleration() -> str:
 __all__ = [
     "Data",
     "EmbeddingIndex",
+    "FuzzyIndex",
     "KeywordIndex",
     "embedding_index_hardware_acceleration",
 ]
