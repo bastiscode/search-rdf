@@ -8,25 +8,20 @@ on:
 jobs:
   linux:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: "Rust: Test"
-        if: matrix.target == 'x86_64'
         run: cargo test
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
-          target: ${{ matrix.target }}
-          manylinux: 2_28  # Use newer manylinux with updated compiler for better SIMD support
+          manylinux: 2_28
           args: --release --out dist
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-linux-${{ matrix.target }}
+          name: wheels-linux
           path: dist
 
   macos:
