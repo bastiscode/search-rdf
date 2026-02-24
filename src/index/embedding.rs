@@ -86,6 +86,13 @@ impl Metric {
         }
     }
 
+    pub fn rerank_metric(self) -> Self {
+        match self {
+            Metric::Hamming => Metric::Cosine,
+            m => m,
+        }
+    }
+
     pub fn compute_distance(&self, query: &[f32], embedding: &[f32]) -> f32 {
         match self {
             Metric::CosineNormalized => {
@@ -377,8 +384,8 @@ impl EmbeddingIndex {
             predicate,
         )?;
 
-        if params.do_rerank() && self.inner.params.precision != Precision::Binary {
-            let metric = self.inner.params.metric;
+        if params.do_rerank() && self.inner.params.precision != Precision::Float32 {
+            let rerank_metric = self.inner.params.metric.rerank_metric();
             let num_dimensions = index.dimensions();
             for (id, score) in &mut matches {
                 let Some(fields) = data.fields(*id as u32) else {
@@ -386,7 +393,10 @@ impl EmbeddingIndex {
                 };
                 let exact = fields
                     .map(|emb| {
-                        metric.to_score(metric.compute_distance(embedding, emb), num_dimensions)
+                        rerank_metric.to_score(
+                            rerank_metric.compute_distance(embedding, emb),
+                            num_dimensions,
+                        )
                     })
                     .fold(f32::NEG_INFINITY, f32::max);
                 if exact.is_finite() {
@@ -595,15 +605,17 @@ impl EmbeddingIndexWithData {
             predicate,
         )?;
 
-        if params.do_rerank() && self.inner.params.precision != Precision::Binary {
-            let metric = self.inner.params.metric;
+        if params.do_rerank() && self.inner.params.precision != Precision::Float32 {
+            let rerank_metric = self.inner.params.metric.rerank_metric();
             let num_dimensions = index.dimensions();
             for (field_id, score) in &mut matches {
                 let Some(emb) = data.field_embedding(*field_id as usize) else {
                     continue;
                 };
-                let exact =
-                    metric.to_score(metric.compute_distance(embedding, emb), num_dimensions);
+                let exact = rerank_metric.to_score(
+                    rerank_metric.compute_distance(embedding, emb),
+                    num_dimensions,
+                );
                 if exact.is_finite() {
                     *score = exact;
                 }
