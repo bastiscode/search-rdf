@@ -85,6 +85,35 @@ impl Metric {
             _ => Metric::CosineNormalized,
         }
     }
+
+    pub fn compute_distance(&self, query: &[f32], embedding: &[f32]) -> f32 {
+        match self {
+            Metric::CosineNormalized => {
+                let dot: f32 = query.iter().zip(embedding).map(|(a, b)| a * b).sum();
+                1.0 - dot
+            }
+            Metric::Cosine => {
+                let dot: f32 = query.iter().zip(embedding).map(|(a, b)| a * b).sum();
+                let norm_q: f32 = query.iter().map(|a| a * a).sum::<f32>().sqrt();
+                let norm_e: f32 = embedding.iter().map(|b| b * b).sum::<f32>().sqrt();
+                if norm_q == 0.0 || norm_e == 0.0 {
+                    1.0
+                } else {
+                    1.0 - dot / (norm_q * norm_e)
+                }
+            }
+            Metric::InnerProduct => {
+                let dot: f32 = query.iter().zip(embedding).map(|(a, b)| a * b).sum();
+                1.0 - dot
+            }
+            Metric::L2 => query
+                .iter()
+                .zip(embedding)
+                .map(|(a, b)| (a - b).powi(2))
+                .sum(),
+            Metric::Hamming => panic!("compute_distance called on Hamming metric"),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -348,6 +377,24 @@ impl EmbeddingIndex {
             predicate,
         )?;
 
+        if params.do_rerank() && self.inner.params.precision != Precision::Binary {
+            let metric = self.inner.params.metric;
+            let num_dimensions = index.dimensions();
+            for (id, score) in &mut matches {
+                let Some(fields) = data.fields(*id as u32) else {
+                    continue;
+                };
+                let exact = fields
+                    .map(|emb| {
+                        metric.to_score(metric.compute_distance(embedding, emb), num_dimensions)
+                    })
+                    .fold(f32::NEG_INFINITY, f32::max);
+                if exact.is_finite() {
+                    *score = exact;
+                }
+            }
+        }
+
         // Deduplicate by ID (keeping the best score for each ID)
         matches.sort_by_key(|&(id, score)| (id, Reverse(OrderedFloat(score))));
         matches.dedup_by(|a, b| a.0 == b.0);
@@ -538,7 +585,7 @@ impl EmbeddingIndexWithData {
 
         let predicate = filter.map(|f| self.filter_internal(f));
 
-        let matches = EmbeddingIndex::search(
+        let mut matches = EmbeddingIndex::search(
             embedding,
             index,
             self.inner.params.metric,
@@ -547,6 +594,21 @@ impl EmbeddingIndexWithData {
             params,
             predicate,
         )?;
+
+        if params.do_rerank() && self.inner.params.precision != Precision::Binary {
+            let metric = self.inner.params.metric;
+            let num_dimensions = index.dimensions();
+            for (field_id, score) in &mut matches {
+                let Some(emb) = data.field_embedding(*field_id as usize) else {
+                    continue;
+                };
+                let exact =
+                    metric.to_score(metric.compute_distance(embedding, emb), num_dimensions);
+                if exact.is_finite() {
+                    *score = exact;
+                }
+            }
+        }
 
         // Sort by data_id, then by score descending, then by field_id
         let mut matches: Vec<_> = matches
@@ -953,6 +1015,56 @@ mod embedding_index_tests {
             }
         }
 
+        // Test reranking produces exact fp32 scores for quantized precisions
+        for precision in &precisions {
+            let index_dir = temp_dir
+                .path()
+                .join(format!("index_rerank_{:?}", precision));
+            create_dir_all(&index_dir).expect("Failed to create index dir");
+
+            let params = EmbeddingIndexParams::default()
+                .with_metric(Metric::CosineNormalized)
+                .with_precision(*precision);
+
+            EmbeddingIndex::build(&data, &index_dir, &params).expect("Failed to build index");
+            let index =
+                EmbeddingIndex::load(data.clone(), &index_dir).expect("Failed to load index");
+
+            let mut query = vec![1.0, 0.0, 0.0, 0.0];
+            normalize(&mut query);
+
+            let rerank_params = EmbeddingSearchParams {
+                k: 3,
+                rerank: Some(2.0),
+                ..Default::default()
+            };
+            let results = index
+                .search(&query, &rerank_params)
+                .expect("Failed to search with reranking");
+
+            assert!(
+                !results.is_empty(),
+                "No results with reranking for {:?}",
+                precision
+            );
+            if let Match::Regular(id, score) = results[0] {
+                assert_eq!(
+                    id, 100,
+                    "Wrong top result with reranking for {:?}",
+                    precision
+                );
+                // Exact fp32 cosine of normalized [1,0,0,0] with itself = 1.0
+                assert!(
+                    (score - 1.0).abs() < 1e-5,
+                    "Reranked score should be exact fp32 1.0 for {:?}, got {}",
+                    precision,
+                    score
+                );
+            } else {
+                panic!("Expected Match::Regular with reranking for {:?}", precision);
+            }
+        }
+
         // Test Hamming metric with Binary precision
         // Binary precision in usearch expects dimensions to be multiples of 8 bits (1 byte)
         // Since we're storing float32 vectors and converting to binary, use 32D (4 bytes packed)
@@ -1013,5 +1125,78 @@ mod embedding_index_tests {
         } else {
             panic!("Expected Match::Regular for Hamming Binary");
         }
+    }
+
+    #[test]
+    fn test_reranking_corrects_quantization_error() {
+        // [0.6, 0.8, 0, 0] is a 3-4-5 normalized vector. With Int8, the 0.6 component
+        // quantizes to ~95/127 ≈ 0.5984, so the quantized cosine with [1,0,0,0] is ≠ 0.6.
+        // Reranking should recover the exact fp32 score of 0.6.
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let data_dir = temp_dir.path().join("data");
+        create_dir_all(&data_dir).expect("Failed to create data dir");
+
+        let embeddings = vec![
+            vec![0.6f32, 0.8, 0.0, 0.0], // ID 100, cosine with [1,0,0,0] = 0.6
+            vec![0.0f32, 0.0, 1.0, 0.0], // ID 200
+            vec![0.0f32, 0.0, 0.0, 1.0], // ID 300
+        ];
+        let ids = vec![100u32, 200, 300];
+
+        create_test_safetensors(&data_dir.join("embedding.safetensors"), embeddings, ids)
+            .expect("Failed to create safetensors");
+
+        Embeddings::build(&data_dir).expect("Failed to build data");
+        let data = Embeddings::load(&data_dir).expect("Failed to load data");
+
+        let index_dir = temp_dir.path().join("index");
+        create_dir_all(&index_dir).expect("Failed to create index dir");
+
+        let params = EmbeddingIndexParams::default()
+            .with_metric(Metric::CosineNormalized)
+            .with_precision(Precision::Int8);
+        EmbeddingIndex::build(&data, &index_dir, &params).expect("Failed to build index");
+        let index = EmbeddingIndex::load(data.clone(), &index_dir).expect("Failed to load index");
+
+        let query = vec![1.0f32, 0.0, 0.0, 0.0];
+
+        let score_without_rerank = match index
+            .search(&query, &EmbeddingSearchParams::default())
+            .expect("Failed to search")[0]
+        {
+            Match::Regular(_, s) => s,
+            _ => panic!("Expected Match::Regular"),
+        };
+
+        let score_with_rerank = match index
+            .search(
+                &query,
+                &EmbeddingSearchParams {
+                    k: 3,
+                    rerank: Some(2.0),
+                    ..Default::default()
+                },
+            )
+            .expect("Failed to search with reranking")[0]
+        {
+            Match::Regular(id, s) => {
+                assert_eq!(id, 100);
+                s
+            }
+            _ => panic!("Expected Match::Regular"),
+        };
+
+        // Without reranking, Int8 quantization introduces error
+        assert!(
+            (score_without_rerank - 0.6).abs() > 1e-4,
+            "Expected quantization error in non-reranked score, got {}",
+            score_without_rerank
+        );
+        // With reranking, the exact fp32 cosine of [1,0,0,0] · [0.6,0.8,0,0] = 0.6 is recovered
+        assert!(
+            (score_with_rerank - 0.6).abs() < 1e-5,
+            "Reranked score should be exact fp32 0.6, got {}",
+            score_with_rerank
+        );
     }
 }

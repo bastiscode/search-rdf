@@ -322,6 +322,10 @@ impl EmbeddingsWithData {
         })
     }
 
+    pub fn field_embedding(&self, field_id: usize) -> Option<EmbeddingRef<'_>> {
+        self.inner.tensors.get(field_id)
+    }
+
     pub fn data(&self) -> &Data {
         &self.inner.data
     }
