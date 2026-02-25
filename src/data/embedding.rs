@@ -211,6 +211,14 @@ impl Embeddings {
         })
     }
 
+    pub fn data_id_for_field(&self, field_id: usize) -> Option<u32> {
+        self.inner.id_map.data_id_for_field(field_id)
+    }
+
+    pub fn field_embedding(&self, field_id: usize) -> Option<EmbeddingRef<'_>> {
+        self.inner.tensors.get(field_id)
+    }
+
     /// Get the number of dimensions
     pub fn num_dimensions(&self) -> usize {
         self.inner.tensors.num_dimensions()

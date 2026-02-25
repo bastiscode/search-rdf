@@ -348,6 +348,11 @@ impl OrderedIdMap {
         Some((offset - last_offset) as u16)
     }
 
+    pub fn data_id_for_field(&self, field_id: usize) -> Option<u32> {
+        let i = self.offsets.partition_point(|&off| off <= field_id);
+        self.ids.get(i).copied()
+    }
+
     pub fn range(&self, id: u32) -> Option<Range<usize>> {
         let index = self.ids.binary_search(&id).ok()?;
         let offset = self.offsets[index];
@@ -520,6 +525,22 @@ mod tests {
         assert_eq!(map.range(20), Some(1..2));
         assert_eq!(map.range(30), Some(2..3));
         assert_eq!(map.range(40), Some(3..4));
+    }
+
+    #[test]
+    fn test_ordered_id_map_data_id_for_field() {
+        // IDs 10 (3 fields), 20 (2 fields), 30 (1 field)
+        // field layout: [0,1,2]=10, [3,4]=20, [5]=30
+        let ids = vec![10, 10, 10, 20, 20, 30];
+        let map = OrderedIdMap::from_ids(&ids).expect("Failed to create map");
+
+        assert_eq!(map.data_id_for_field(0), Some(10));
+        assert_eq!(map.data_id_for_field(1), Some(10));
+        assert_eq!(map.data_id_for_field(2), Some(10));
+        assert_eq!(map.data_id_for_field(3), Some(20));
+        assert_eq!(map.data_id_for_field(4), Some(20));
+        assert_eq!(map.data_id_for_field(5), Some(30));
+        assert_eq!(map.data_id_for_field(6), None);
     }
 
     #[test]

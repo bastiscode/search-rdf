@@ -372,7 +372,13 @@ impl EmbeddingIndex {
         let data = &self.inner.data;
         let index = &self.inner.index;
 
-        let predicate = filter.map(|f| move |id| f(id as u32));
+        let predicate = filter.map(|f| {
+            let data = data.clone();
+            move |field_id: u64| {
+                data.data_id_for_field(field_id as usize)
+                    .map_or(false, |data_id| f(data_id))
+            }
+        });
 
         let mut matches = Self::search(
             embedding,
@@ -387,35 +393,33 @@ impl EmbeddingIndex {
         if params.do_rerank() && self.inner.params.precision != Precision::Float32 {
             let rerank_metric = self.inner.params.metric.rerank_metric();
             let num_dimensions = index.dimensions();
-            for (id, score) in &mut matches {
-                let Some(fields) = data.fields(*id as u32) else {
+            for (field_id, score) in &mut matches {
+                let Some(emb) = data.field_embedding(*field_id as usize) else {
                     continue;
                 };
-                let exact = fields
-                    .map(|emb| {
-                        rerank_metric.to_score(
-                            rerank_metric.compute_distance(embedding, emb),
-                            num_dimensions,
-                        )
-                    })
-                    .fold(f32::NEG_INFINITY, f32::max);
-                if exact.is_finite() {
-                    *score = exact;
-                }
+                *score = rerank_metric.to_score(
+                    rerank_metric.compute_distance(embedding, emb),
+                    num_dimensions,
+                );
             }
         }
 
-        // Deduplicate by ID (keeping the best score for each ID)
+        // Map field_id → data_id and deduplicate (keeping best score per data_id)
+        let mut matches: Vec<(u32, f32)> = matches
+            .into_iter()
+            .filter_map(|(field_id, score)| {
+                Some((data.data_id_for_field(field_id as usize)?, score))
+            })
+            .collect();
+
         matches.sort_by_key(|&(id, score)| (id, Reverse(OrderedFloat(score))));
         matches.dedup_by(|a, b| a.0 == b.0);
 
-        // Sort by score descending, then by ID
         matches.sort_by_key(|&(id, score)| (Reverse(OrderedFloat(score)), id));
 
-        // Take top k and create Match objects
-        let matches: Vec<Match> = matches
+        let matches = matches
             .into_iter()
-            .map(|(id, score)| Match::Regular(id as u32, score))
+            .map(|(id, score)| Match::Regular(id, score))
             .take(params.k)
             .collect();
 
@@ -445,7 +449,7 @@ impl Search for EmbeddingIndex {
             connectivity: params.connectivity,
             expansion_add: params.expansion_add,
             expansion_search: params.expansion_search,
-            multi: true, // Enable multi-index to support duplicate IDs
+            multi: false,
         };
 
         let index = Index::new(&options)?;
@@ -455,17 +459,16 @@ impl Search for EmbeddingIndex {
 
         let pb = progress_bar("Building embedding index", Some(total_fields as u64))?;
 
-        // Add all embeddings to the index using their IDs as keys (not indices)
-        // Multiple embeddings can have the same ID
-        for (id, embeddings) in data.items() {
+        let mut field_id: u64 = 0;
+        for (_, embeddings) in data.items() {
             for emb in embeddings {
                 if params.precision == Precision::Binary {
                     let binary_emb = binary_quantization(emb)?;
-                    index.add(id as u64, b1x8::from_u8s(&binary_emb))?;
+                    index.add(field_id, b1x8::from_u8s(&binary_emb))?;
                 } else {
-                    index.add(id as u64, emb)?;
+                    index.add(field_id, emb)?;
                 }
-
+                field_id += 1;
                 pb.inc(1);
             }
         }
@@ -496,7 +499,7 @@ impl Search for EmbeddingIndex {
             connectivity: params.connectivity,
             expansion_add: params.expansion_add,
             expansion_search: params.expansion_search,
-            multi: true, // Enable multi-index to support duplicate IDs
+            multi: false,
         };
         let index = Index::new(&options)?;
 
@@ -612,13 +615,10 @@ impl EmbeddingIndexWithData {
                 let Some(emb) = data.field_embedding(*field_id as usize) else {
                     continue;
                 };
-                let exact = rerank_metric.to_score(
+                *score = rerank_metric.to_score(
                     rerank_metric.compute_distance(embedding, emb),
                     num_dimensions,
                 );
-                if exact.is_finite() {
-                    *score = exact;
-                }
             }
         }
 
@@ -779,7 +779,8 @@ impl Search for EmbeddingIndexWithData {
 #[cfg(test)]
 mod embedding_index_tests {
     use super::*;
-    use crate::data::{Embeddings, Precision};
+    use crate::data::item::{Field, Item};
+    use crate::data::{Data, Embeddings, EmbeddingsWithData, Precision};
     use std::collections::HashMap;
     use std::fs::create_dir_all;
     use tempfile::tempdir;
@@ -1205,6 +1206,405 @@ mod embedding_index_tests {
             score_without_rerank
         );
         // With reranking, the exact fp32 cosine of [1,0,0,0] · [0.6,0.8,0,0] = 0.6 is recovered
+        assert!(
+            (score_with_rerank - 0.6).abs() < 1e-5,
+            "Reranked score should be exact fp32 0.6, got {}",
+            score_with_rerank
+        );
+    }
+
+    fn build_test_data_with_embeddings(
+        data_dir: &Path,
+        items: Vec<Item>,
+        embeddings: Vec<Vec<f32>>,
+    ) -> Result<EmbeddingsWithData> {
+        let items_result: Vec<Result<Item>> = items.into_iter().map(Ok).collect();
+        Data::build(items_result, data_dir)?;
+        let data = Data::load(data_dir)?;
+
+        let embedding_path = data_dir.join("embedding.safetensors");
+        create_test_safetensors_without_ids(&embedding_path, embeddings)?;
+
+        EmbeddingsWithData::load(data, &embedding_path)
+    }
+
+    #[test]
+    fn test_embedding_index_with_data() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let data_dir = temp_dir.path().join("data");
+        create_dir_all(&data_dir).expect("Failed to create data dir");
+
+        // Item 0 has 2 fields → 2 embeddings (field_ids 0 and 1)
+        // Items 1 and 2 have 1 field each → field_ids 2 and 3
+        let items = vec![
+            Item {
+                identifier: "item0".to_string(),
+                fields: vec![Field::text("a"), Field::text("b")],
+            },
+            Item {
+                identifier: "item1".to_string(),
+                fields: vec![Field::text("c")],
+            },
+            Item {
+                identifier: "item2".to_string(),
+                fields: vec![Field::text("d")],
+            },
+        ];
+
+        // Embeddings in field order: item0-field0, item0-field1, item1-field0, item2-field0
+        let mut embeddings = vec![
+            vec![1.0f32, 0.0, 0.0, 0.0], // item0 field0
+            vec![0.9f32, 0.1, 0.0, 0.0], // item0 field1 (similar to field0)
+            vec![0.0f32, 1.0, 0.0, 0.0], // item1
+            vec![0.0f32, 0.0, 1.0, 0.0], // item2
+        ];
+        for emb in &mut embeddings {
+            normalize(emb);
+        }
+
+        let emb_data = build_test_data_with_embeddings(&data_dir, items, embeddings.clone())
+            .expect("Failed to build EmbeddingsWithData");
+
+        let metrics = vec![Metric::CosineNormalized, Metric::Cosine, Metric::L2];
+        let precisions = vec![
+            Precision::Float32,
+            Precision::Float16,
+            Precision::BFloat16,
+            Precision::Int8,
+        ];
+
+        for metric in &metrics {
+            for precision in &precisions {
+                let index_dir = temp_dir
+                    .path()
+                    .join(format!("index_{:?}_{:?}", metric, precision));
+                create_dir_all(&index_dir).expect("Failed to create index dir");
+
+                let params = EmbeddingIndexParams::default()
+                    .with_metric(*metric)
+                    .with_precision(*precision);
+
+                EmbeddingIndexWithData::build(&emb_data, &index_dir, &params)
+                    .expect("Failed to build index");
+                let index = EmbeddingIndexWithData::load(emb_data.clone(), &index_dir)
+                    .expect("Failed to load index");
+
+                let mut query = vec![1.0f32, 0.0, 0.0, 0.0];
+                normalize(&mut query);
+
+                let results = index
+                    .search(&query, &EmbeddingSearchParams::default())
+                    .expect("Failed to search");
+
+                assert!(
+                    !results.is_empty(),
+                    "No results for {:?} {:?}",
+                    metric,
+                    precision
+                );
+
+                if let Match::WithField(data_id, _col, score) = results[0] {
+                    assert_eq!(
+                        data_id, 0,
+                        "Expected data_id 0 for {:?} {:?}",
+                        metric, precision
+                    );
+                    match metric {
+                        Metric::CosineNormalized | Metric::Cosine => {
+                            assert!(
+                                score > 0.9,
+                                "Cosine score too low: {} for {:?} {:?}",
+                                score,
+                                metric,
+                                precision
+                            );
+                        }
+                        Metric::L2 => {
+                            assert!(
+                                score > 0.5,
+                                "L2 score too low: {} for {:?} {:?}",
+                                score,
+                                metric,
+                                precision
+                            );
+                        }
+                        _ => {}
+                    }
+                } else {
+                    panic!("Expected Match::WithField for {:?} {:?}", metric, precision);
+                }
+
+                // data_id 0 should appear only once despite having 2 embeddings
+                let id0_count = results
+                    .iter()
+                    .filter(|m| matches!(m, Match::WithField(0, _, _)))
+                    .count();
+                assert_eq!(
+                    id0_count, 1,
+                    "Deduplication failed for {:?} {:?}",
+                    metric, precision
+                );
+
+                // Filter out data_id 0; top result should be data_id 1
+                let results_filtered = index
+                    .search_with_filter(&query, &EmbeddingSearchParams::default(), |id| id != 0)
+                    .expect("Failed filtered search");
+                assert!(
+                    !results_filtered.is_empty(),
+                    "No filtered results for {:?} {:?}",
+                    metric,
+                    precision
+                );
+                if let Match::WithField(data_id, _, _) = results_filtered[0] {
+                    assert_ne!(
+                        data_id, 0,
+                        "Filter failed for {:?} {:?}",
+                        metric, precision
+                    );
+                } else {
+                    panic!("Expected Match::WithField for {:?} {:?}", metric, precision);
+                }
+            }
+        }
+
+        // InnerProduct with unnormalized embeddings
+        let data_dir_ip = temp_dir.path().join("data_ip");
+        create_dir_all(&data_dir_ip).expect("Failed to create data dir");
+        let items_ip = vec![
+            Item {
+                identifier: "item0".to_string(),
+                fields: vec![Field::text("a"), Field::text("b")],
+            },
+            Item {
+                identifier: "item1".to_string(),
+                fields: vec![Field::text("c")],
+            },
+            Item {
+                identifier: "item2".to_string(),
+                fields: vec![Field::text("d")],
+            },
+        ];
+        let embeddings_ip = vec![
+            vec![2.0f32, 0.0, 0.0, 0.0],
+            vec![1.8f32, 0.2, 0.0, 0.0],
+            vec![0.0f32, 2.0, 0.0, 0.0],
+            vec![0.0f32, 0.0, 2.0, 0.0],
+        ];
+        let emb_data_ip =
+            build_test_data_with_embeddings(&data_dir_ip, items_ip, embeddings_ip)
+                .expect("Failed to build EmbeddingsWithData");
+
+        for precision in &precisions {
+            let index_dir = temp_dir
+                .path()
+                .join(format!("index_ip_InnerProduct_{:?}", precision));
+            create_dir_all(&index_dir).expect("Failed to create index dir");
+
+            let params = EmbeddingIndexParams::default()
+                .with_metric(Metric::InnerProduct)
+                .with_precision(*precision);
+
+            EmbeddingIndexWithData::build(&emb_data_ip, &index_dir, &params)
+                .expect("Failed to build index");
+            let index = EmbeddingIndexWithData::load(emb_data_ip.clone(), &index_dir)
+                .expect("Failed to load index");
+
+            let query_ip = vec![1.0f32, 0.0, 0.0, 0.0];
+            let results = index
+                .search(&query_ip, &EmbeddingSearchParams::default())
+                .expect("Failed to search");
+
+            assert!(
+                !results.is_empty(),
+                "No results for InnerProduct {:?}",
+                precision
+            );
+            if let Match::WithField(data_id, _, score) = results[0] {
+                assert_eq!(
+                    data_id, 0,
+                    "Expected data_id 0 for InnerProduct {:?}",
+                    precision
+                );
+                assert!(
+                    score.abs() > 0.1,
+                    "IP score too small: {} for {:?}",
+                    score,
+                    precision
+                );
+            } else {
+                panic!("Expected Match::WithField for InnerProduct {:?}", precision);
+            }
+        }
+
+        // Hamming/Binary
+        let data_dir_h = temp_dir.path().join("data_hamming");
+        create_dir_all(&data_dir_h).expect("Failed to create data dir");
+        let items_h = vec![
+            Item {
+                identifier: "item0".to_string(),
+                fields: vec![Field::text("a"), Field::text("b")],
+            },
+            Item {
+                identifier: "item1".to_string(),
+                fields: vec![Field::text("c")],
+            },
+            Item {
+                identifier: "item2".to_string(),
+                fields: vec![Field::text("d")],
+            },
+        ];
+        let mut emb_h1 = vec![1.0f32; 16];
+        emb_h1.extend(vec![0.0f32; 16]);
+        let mut emb_h2 = vec![1.0f32; 14];
+        emb_h2.extend(vec![0.0f32; 18]);
+        let mut emb_h3 = vec![0.0f32; 16];
+        emb_h3.extend(vec![1.0f32; 16]);
+        let mut emb_h4 = vec![0.0f32; 14];
+        emb_h4.extend(vec![1.0f32; 18]);
+        let embeddings_h = vec![emb_h1, emb_h2, emb_h3, emb_h4];
+        let emb_data_h = build_test_data_with_embeddings(&data_dir_h, items_h, embeddings_h)
+            .expect("Failed to build EmbeddingsWithData");
+
+        let index_dir_h = temp_dir.path().join("index_hamming");
+        create_dir_all(&index_dir_h).expect("Failed to create index dir");
+
+        let params_h = EmbeddingIndexParams::default()
+            .with_metric(Metric::Hamming)
+            .with_precision(Precision::Binary);
+        EmbeddingIndexWithData::build(&emb_data_h, &index_dir_h, &params_h)
+            .expect("Failed to build index");
+        let index_h = EmbeddingIndexWithData::load(emb_data_h, &index_dir_h)
+            .expect("Failed to load index");
+
+        let mut query_h = vec![1.0f32; 16];
+        query_h.extend(vec![0.0f32; 16]);
+        let results_h = index_h
+            .search(&query_h, &EmbeddingSearchParams::default())
+            .expect("Failed to search");
+
+        assert!(!results_h.is_empty(), "No results for Hamming Binary");
+        if let Match::WithField(data_id, _, score) = results_h[0] {
+            assert_eq!(data_id, 0, "Expected data_id 0 for Hamming Binary");
+            assert!(
+                (0.0..=1.0).contains(&score),
+                "Hamming score out of range: {}",
+                score
+            );
+        } else {
+            panic!("Expected Match::WithField for Hamming Binary");
+        }
+    }
+
+    fn create_test_safetensors_without_ids(path: &Path, embeddings: Vec<Vec<f32>>) -> Result<()> {
+        use safetensors::serialize;
+        use safetensors::tensor::{Dtype, TensorView};
+
+        let num_embeddings = embeddings.len();
+        let num_dimensions = embeddings[0].len();
+        let data: Vec<f32> = embeddings.into_iter().flatten().collect();
+        let data_bytes: Vec<u8> = data.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let embedding_tensor = TensorView::new(
+            Dtype::F32,
+            vec![num_embeddings, num_dimensions],
+            &data_bytes,
+        )?;
+        let bytes = serialize(
+            vec![("embedding", embedding_tensor)],
+            Some(HashMap::from([(
+                String::from("model"),
+                String::from("test-model"),
+            )])),
+        )?;
+        std::fs::write(path, bytes)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_embedding_index_with_data_reranking_corrects_quantization_error() {
+        // Same 3-4-5 setup as test_reranking_corrects_quantization_error but using
+        // EmbeddingIndexWithData, which stores embeddings alongside Data items.
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let data_dir = temp_dir.path().join("data");
+        create_dir_all(&data_dir).expect("Failed to create data dir");
+
+        // Three items, one field each — the field count must match the embedding count.
+        let items = vec![
+            Ok(Item {
+                identifier: "item0".to_string(),
+                fields: vec![Field::text("field 0")],
+            }),
+            Ok(Item {
+                identifier: "item1".to_string(),
+                fields: vec![Field::text("field 1")],
+            }),
+            Ok(Item {
+                identifier: "item2".to_string(),
+                fields: vec![Field::text("field 2")],
+            }),
+        ];
+        Data::build(items, &data_dir).expect("Failed to build data");
+        let data = Data::load(&data_dir).expect("Failed to load data");
+
+        // Embeddings in the same order as the items (field_id 0→item0, 1→item1, 2→item2).
+        // [0.6, 0.8, 0, 0] is already unit-length (3-4-5 triangle), cosine with [1,0,0,0] = 0.6.
+        let embeddings = vec![
+            vec![0.6f32, 0.8, 0.0, 0.0],
+            vec![0.0f32, 0.0, 1.0, 0.0],
+            vec![0.0f32, 0.0, 0.0, 1.0],
+        ];
+        let embedding_path = data_dir.join("embedding.safetensors");
+        create_test_safetensors_without_ids(&embedding_path, embeddings)
+            .expect("Failed to create safetensors");
+
+        let emb_data = EmbeddingsWithData::load(data, &embedding_path)
+            .expect("Failed to load EmbeddingsWithData");
+
+        let index_dir = temp_dir.path().join("index");
+        create_dir_all(&index_dir).expect("Failed to create index dir");
+
+        let params = EmbeddingIndexParams::default()
+            .with_metric(Metric::CosineNormalized)
+            .with_precision(Precision::Int8);
+        EmbeddingIndexWithData::build(&emb_data, &index_dir, &params)
+            .expect("Failed to build index");
+        let index =
+            EmbeddingIndexWithData::load(emb_data, &index_dir).expect("Failed to load index");
+
+        let query = vec![1.0f32, 0.0, 0.0, 0.0];
+
+        let score_without_rerank = match index
+            .search(&query, &EmbeddingSearchParams::default())
+            .expect("Failed to search")[0]
+        {
+            Match::WithField(_, _, s) => s,
+            _ => panic!("Expected Match::WithField"),
+        };
+
+        let score_with_rerank = match index
+            .search(
+                &query,
+                &EmbeddingSearchParams {
+                    k: 3,
+                    rerank: Some(2.0),
+                    ..Default::default()
+                },
+            )
+            .expect("Failed to search with reranking")[0]
+        {
+            Match::WithField(id, _, s) => {
+                assert_eq!(id, 0, "Expected data_id 0 (item0)");
+                s
+            }
+            _ => panic!("Expected Match::WithField"),
+        };
+
+        // Int8 quantization introduces error
+        assert!(
+            (score_without_rerank - 0.6).abs() > 1e-4,
+            "Expected quantization error in non-reranked score, got {}",
+            score_without_rerank
+        );
+        // Reranking recovers the exact fp32 cosine of [1,0,0,0] · [0.6,0.8,0,0] = 0.6
         assert!(
             (score_with_rerank - 0.6).abs() < 1e-5,
             "Reranked score should be exact fp32 0.6, got {}",
