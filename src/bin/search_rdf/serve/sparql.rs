@@ -616,34 +616,38 @@ pub async fn qlproxy(
         };
 
         let id_to_row = Arc::new(id_to_row);
-        let id_to_row_filter = id_to_row.clone();
-        let filter = move |id| id_to_row_filter.contains_key(&id);
 
         let matches = if let Some(data_id) = maybe_neighbor_id {
-            vec![
+            vec![if has_filter_column {
+                let id_to_row_filter = id_to_row.clone();
                 perform_neighbor_search_with_filter(
                     index,
                     data_id,
                     search_params,
                     model,
-                    filter,
+                    move |id| id_to_row_filter.contains_key(&id),
                 )
-                .await?,
-            ]
+                .await?
+            } else {
+                perform_neighbor_search(index, data_id, search_params, model).await?
+            }]
         } else if is_iri {
             return Err(AppError(
                 StatusCode::BAD_REQUEST,
                 anyhow!("IRI '{query_str}' not known in index"),
             ));
-        } else {
+        } else if has_filter_column {
+            let id_to_row_filter = id_to_row.clone();
             perform_search_with_filter(
                 index,
                 vec![Query::Text(query_str)],
                 search_params,
                 model,
-                filter,
+                move |id| id_to_row_filter.contains_key(&id),
             )
             .await?
+        } else {
+            perform_search(index, vec![Query::Text(query_str)], search_params, model).await?
         };
 
         let row_fn = move |id: u32| {
