@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use search_rdf::{
     data::{Data, DataSource},
-    index::{Match, Search},
+    index::{Match, Scored, Search, merge_neighbor_matches},
     model::{Embed, EmbeddingModel},
 };
 use serde_json::{Value, json};
@@ -74,6 +74,15 @@ impl SearchMatch {
 impl From<Match> for SearchMatch {
     fn from(m: Match) -> Self {
         SearchMatch::new(m.id(), m.score(), MatchInfo::None)
+    }
+}
+
+impl Scored for SearchMatch {
+    fn id(&self) -> u32 {
+        self.id
+    }
+    fn score(&self) -> f32 {
+        self.score
     }
 }
 
@@ -318,58 +327,25 @@ pub async fn perform_search(
     }
 }
 
-/// Extract queries for neighbor search from an item's fields.
-/// For text indices returns one Query::Text per field; for embedding returns one Query::Embedding.
+/// Extract embedding queries for neighbor search from a known item.
+/// Only supported for embedding indices; all other index types return an error.
 fn get_neighbor_queries(index: &SearchIndex, data_id: u32) -> Result<Vec<Query>> {
     match index {
-        SearchIndex::Keyword(idx) => idx
-            .data()
-            .fields(data_id)
-            .ok_or_else(|| anyhow!("Item {} not found in keyword index", data_id))
-            .map(|fields| fields.map(|f| Query::Text(f.as_str().to_string())).collect()),
-        SearchIndex::Fuzzy(idx) => idx
-            .data()
-            .fields(data_id)
-            .ok_or_else(|| anyhow!("Item {} not found in fuzzy index", data_id))
-            .map(|fields| fields.map(|f| Query::Text(f.as_str().to_string())).collect()),
-        SearchIndex::FullText(idx) => idx
-            .data()
-            .fields(data_id)
-            .ok_or_else(|| anyhow!("Item {} not found in full-text index", data_id))
-            .map(|fields| fields.map(|f| Query::Text(f.as_str().to_string())).collect()),
         SearchIndex::EmbeddingWithData(idx) => idx
             .field_embeddings(data_id)
             .ok_or_else(|| anyhow!("Item {} not found in embedding index", data_id))
             .map(|embs| embs.map(|e| Query::Embedding(e.to_vec())).collect()),
-        SearchIndex::Embedding(_) => Err(anyhow!(
-            "Neighbor search by identifier is not supported for plain embedding index"
+        SearchIndex::Embedding(idx) => idx
+            .data()
+            .fields(data_id)
+            .ok_or_else(|| anyhow!("Item {} not found in embedding index", data_id))
+            .map(|embs| embs.map(|e| Query::Embedding(e.to_vec())).collect()),
+        _ => Err(anyhow!(
+            "Neighbor search is only supported for embedding indices"
         )),
     }
 }
 
-/// Merge per-field match lists into a single list, keeping the best score per item id.
-/// Results are sorted by score descending and truncated to `k`.
-fn merge_matches(results: Vec<Vec<SearchMatch>>, k: usize) -> Vec<SearchMatch> {
-    let mut best_score: HashMap<u32, f32> = HashMap::new();
-    let mut by_id: HashMap<u32, SearchMatch> = HashMap::new();
-
-    for m in results.into_iter().flatten() {
-        let prev = best_score.get(&m.id).copied().unwrap_or(f32::NEG_INFINITY);
-        if m.score > prev {
-            best_score.insert(m.id, m.score);
-            by_id.insert(m.id, m);
-        }
-    }
-
-    let mut merged: Vec<SearchMatch> = by_id.into_values().collect();
-    merged.sort_unstable_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    merged.truncate(k);
-    merged
-}
 
 /// Find the top-k neighbors of a known item, excluding the item itself.
 ///
@@ -394,7 +370,7 @@ pub async fn perform_neighbor_search(
                 .collect()
         })
         .collect();
-    Ok(merge_matches(filtered, k))
+    Ok(merge_neighbor_matches(filtered, k))
 }
 
 /// Find the top-k neighbors of a known item with an additional filter, excluding the item itself.
@@ -412,7 +388,7 @@ pub async fn perform_neighbor_search_with_filter(
     let combined_filter = move |id: u32| id != data_id && filter(id);
     let all_results =
         perform_search_with_filter(index, queries, params, model, combined_filter).await?;
-    Ok(merge_matches(all_results, k))
+    Ok(merge_neighbor_matches(all_results, k))
 }
 
 #[cfg(test)]

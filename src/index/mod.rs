@@ -5,6 +5,7 @@ pub mod text;
 use crate::data::DataSource;
 use anyhow::Result;
 use pyo3::IntoPyObject;
+use std::collections::HashMap;
 use std::path::Path;
 
 pub use embedding::EmbeddingIndexWithData;
@@ -38,6 +39,42 @@ impl Match {
             Match::WithField(.., score) => *score,
         }
     }
+}
+
+/// Implemented by any match type that carries an id and a score.
+pub trait Scored {
+    fn id(&self) -> u32;
+    fn score(&self) -> f32;
+}
+
+impl Scored for Match {
+    fn id(&self) -> u32 {
+        self.id()
+    }
+    fn score(&self) -> f32 {
+        self.score()
+    }
+}
+
+/// Merge per-field match lists: keep best score per id, sort desc, truncate to k.
+pub fn merge_neighbor_matches<T: Scored>(results: Vec<Vec<T>>, k: usize) -> Vec<T> {
+    let mut best: HashMap<u32, T> = HashMap::new();
+    for m in results.into_iter().flatten() {
+        let id = m.id();
+        let score = m.score();
+        let prev = best.get(&id).map(|m| m.score()).unwrap_or(f32::NEG_INFINITY);
+        if score > prev {
+            best.insert(id, m);
+        }
+    }
+    let mut merged: Vec<T> = best.into_values().collect();
+    merged.sort_unstable_by(|a, b| {
+        b.score()
+            .partial_cmp(&a.score())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    merged.truncate(k);
+    merged
 }
 
 // for use with serde defaults

@@ -97,6 +97,42 @@ impl EmbeddingIndex {
         }
     }
 
+    #[pyo3(signature = (id, k=10, exact=false, min_score=None, rerank=None, allow_ids=None))]
+    pub fn search_neighbor(
+        &self,
+        id: u32,
+        k: usize,
+        exact: bool,
+        min_score: Option<f32>,
+        rerank: Option<f32>,
+        allow_ids: Option<HashSet<u32>>,
+    ) -> Result<Vec<Match>> {
+        let embeddings: Vec<Vec<f32>> = self
+            .inner
+            .field_embeddings(id)
+            .ok_or_else(|| anyhow!("Item {id} not found"))?
+            .map(|e| e.to_vec())
+            .collect();
+        let params = EmbeddingSearchParams {
+            k: k + 1,
+            exact,
+            min_score,
+            rerank,
+        };
+        let mut all_results: Vec<Vec<Match>> = Vec::new();
+        for emb in &embeddings {
+            let mut results = if let Some(ref ids) = allow_ids {
+                self.inner
+                    .search_with_filter(emb.as_slice(), &params, |fid| ids.contains(&fid))?
+            } else {
+                self.inner.search(emb.as_slice(), &params)?
+            };
+            results.retain(|m| m.id() != id);
+            all_results.push(results);
+        }
+        Ok(crate::index::merge_neighbor_matches(all_results, k))
+    }
+
     #[getter]
     pub fn index_type(&self) -> &str {
         "embedding"

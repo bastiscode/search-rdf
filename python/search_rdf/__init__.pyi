@@ -121,6 +121,7 @@ class KeywordIndex:
         """
         ...
 
+
     def data(self) -> Data:
         """
         Get the data associated with the index.
@@ -192,6 +193,7 @@ class FuzzyIndex:
         """
         ...
 
+
     def data(self) -> Data:
         """
         Get the data associated with the index.
@@ -247,6 +249,31 @@ class EmbeddingIndex:
 
         Returns:
             Loaded EmbeddingIndex instance
+        """
+        ...
+
+    def search_neighbor(
+        self,
+        id: int,
+        k: int = 10,
+        exact: bool = False,
+        min_score: float | None = None,
+        rerank: float | None = None,
+        allow_ids: set[int] | None = None,
+    ) -> list[tuple[int, int, float]]:
+        """
+        Find the k nearest neighbors of a known item by id.
+
+        Args:
+            id: Document ID to find neighbors for
+            k: Number of results to return (default: 10)
+            exact: Use exact search instead of approximate (default: False)
+            min_score: Minimum score threshold (optional)
+            rerank: Reranking factor for oversampling (optional)
+            allow_ids: Set of document IDs to restrict results to (optional)
+
+        Returns:
+            List of (document_id, field_index, score) tuples
         """
         ...
 
