@@ -493,6 +493,7 @@ pub async fn qlproxy(
     // Parse input bindings - build id_to_row (filter column) and query_items (query column)
     let mut id_to_row: HashMap<u32, Term> = HashMap::new();
     let mut query_items: Vec<(Term, u32)> = Vec::new();
+    let mut has_filter_column = false;
     for solution_result in solutions.into_iter() {
         let solution = solution_result.map_err(|e| {
             AppError(
@@ -510,10 +511,11 @@ pub async fn qlproxy(
         })?;
 
         // Optional `filter` column — constrains the search space
-        if let Some(term) = solution.get("filter")
-            && let Some(id) = resolve_to_id(&index, term)?
-        {
-            id_to_row.insert(id, row_binding.clone());
+        if let Some(term) = solution.get("filter") {
+            has_filter_column = true;
+            if let Some(id) = resolve_to_id(&index, term)? {
+                id_to_row.insert(id, row_binding.clone());
+            }
         }
 
         // Optional `query` column — identifier mode: one neighbor search per item
@@ -575,19 +577,25 @@ pub async fn qlproxy(
     let start = Instant::now();
     let response = if !query_items.is_empty() {
         // Identifier mode: loop over query items, one neighbor search per item
+        // If no filter column was present at all, skip filtering entirely (pass-through).
+        // An empty filter (column present but all IRIs unknown) still restricts to zero results.
         let filter_ids: Arc<HashSet<u32>> = Arc::new(id_to_row.keys().copied().collect());
         let mut identifier_results: Vec<(Term, Vec<SearchMatch>)> = Vec::new();
         for (row_binding, data_id) in query_items {
-            let fids = filter_ids.clone();
-            let f = move |id| fids.contains(&id);
-            let matches = perform_neighbor_search_with_filter(
-                index.clone(),
-                data_id,
-                search_params.clone(),
-                model,
-                f,
-            )
-            .await?;
+            let matches = if has_filter_column {
+                let fids = filter_ids.clone();
+                perform_neighbor_search_with_filter(
+                    index.clone(),
+                    data_id,
+                    search_params.clone(),
+                    model,
+                    move |id| fids.contains(&id),
+                )
+                .await?
+            } else {
+                perform_neighbor_search(index.clone(), data_id, search_params.clone(), model)
+                    .await?
+            };
             identifier_results.push((row_binding, matches));
         }
         serialize_identifier_mode_matches(identifier_results, &variables)?
