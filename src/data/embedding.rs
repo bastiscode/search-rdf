@@ -334,6 +334,10 @@ impl EmbeddingsWithData {
         self.inner.tensors.get(field_id)
     }
 
+    pub fn id_from_identifier(&self, identifier: &str) -> Option<u32> {
+        self.inner.data.id_from_identifier(identifier)
+    }
+
     pub fn data(&self) -> &Data {
         &self.inner.data
     }

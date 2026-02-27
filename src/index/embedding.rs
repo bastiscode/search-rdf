@@ -376,7 +376,7 @@ impl EmbeddingIndex {
             let data = data.clone();
             move |field_id: u64| {
                 data.data_id_for_field(field_id as usize)
-                    .map_or(false, |data_id| f(data_id))
+                    .is_some_and(&f)
             }
         });
 
@@ -425,6 +425,7 @@ impl EmbeddingIndex {
 
         Ok(matches)
     }
+
 }
 
 impl Search for EmbeddingIndex {
@@ -584,6 +585,20 @@ impl EmbeddingIndexWithData {
             offset += 1;
         }
         offset
+    }
+
+    pub fn field_embeddings(
+        &self,
+        data_id: u32,
+    ) -> Option<impl Iterator<Item = EmbeddingRef<'_>> + '_> {
+        let ftd = &self.inner.field_to_data;
+        let start = ftd.partition_point(|&d| d < data_id);
+        let end = ftd.partition_point(|&d| d <= data_id);
+        if start == end {
+            return None;
+        }
+        let data = &self.inner.data;
+        Some((start..end).filter_map(move |i| data.field_embedding(i)))
     }
 
     fn search_internal(
@@ -1610,5 +1625,102 @@ mod embedding_index_tests {
             "Reranked score should be exact fp32 0.6, got {}",
             score_with_rerank
         );
+    }
+
+    #[test]
+    fn test_embedding_index_with_data_field_embeddings() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let data_dir = temp_dir.path().join("data");
+        create_dir_all(&data_dir).expect("Failed to create data dir");
+
+        // item0 has 2 fields, item1 and item2 have 1 each
+        let items = vec![
+            Item {
+                identifier: "item0".to_string(),
+                fields: vec![Field::text("a"), Field::text("b")],
+            },
+            Item {
+                identifier: "item1".to_string(),
+                fields: vec![Field::text("c")],
+            },
+            Item {
+                identifier: "item2".to_string(),
+                fields: vec![Field::text("d")],
+            },
+        ];
+        let mut embeddings = vec![
+            vec![1.0f32, 0.0, 0.0, 0.0], // item0 field 0
+            vec![0.9f32, 0.1, 0.0, 0.0], // item0 field 1
+            vec![0.0f32, 1.0, 0.0, 0.0], // item1
+            vec![0.0f32, 0.0, 1.0, 0.0], // item2
+        ];
+        for emb in &mut embeddings {
+            normalize(emb);
+        }
+
+        let emb_data = build_test_data_with_embeddings(&data_dir, items, embeddings.clone())
+            .expect("Failed to build EmbeddingsWithData");
+
+        let index_dir = temp_dir.path().join("index");
+        create_dir_all(&index_dir).expect("Failed to create index dir");
+        EmbeddingIndexWithData::build(&emb_data, &index_dir, &EmbeddingIndexParams::default())
+            .expect("Failed to build index");
+        let index =
+            EmbeddingIndexWithData::load(emb_data, &index_dir).expect("Failed to load index");
+
+        // data_id 0 (item0) has 2 fields
+        let embs_0: Vec<_> = index
+            .field_embeddings(0)
+            .expect("Expected Some for data_id 0")
+            .collect();
+        assert_eq!(embs_0.len(), 2);
+        assert!((embs_0[0][0] - embeddings[0][0]).abs() < 1e-6);
+        assert!((embs_0[1][0] - embeddings[1][0]).abs() < 1e-5);
+
+        // data_id 1 (item1) has 1 field
+        let embs_1: Vec<_> = index
+            .field_embeddings(1)
+            .expect("Expected Some for data_id 1")
+            .collect();
+        assert_eq!(embs_1.len(), 1);
+        assert!((embs_1[0][1] - 1.0).abs() < 1e-6);
+
+        // Unknown data_id returns None
+        assert!(index.field_embeddings(999).is_none());
+    }
+
+    #[test]
+    fn test_embeddings_with_data_id_from_identifier() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let data_dir = temp_dir.path().join("data");
+        create_dir_all(&data_dir).expect("Failed to create data dir");
+
+        let items = vec![
+            Item {
+                identifier: "alice".to_string(),
+                fields: vec![Field::text("a")],
+            },
+            Item {
+                identifier: "bob".to_string(),
+                fields: vec![Field::text("b")],
+            },
+            Item {
+                identifier: "charlie".to_string(),
+                fields: vec![Field::text("c")],
+            },
+        ];
+        let embeddings = vec![
+            vec![1.0f32, 0.0],
+            vec![0.0f32, 1.0],
+            vec![0.7f32, 0.7],
+        ];
+
+        let emb_data = build_test_data_with_embeddings(&data_dir, items, embeddings)
+            .expect("Failed to build EmbeddingsWithData");
+
+        assert_eq!(emb_data.id_from_identifier("alice"), Some(0));
+        assert_eq!(emb_data.id_from_identifier("bob"), Some(1));
+        assert_eq!(emb_data.id_from_identifier("charlie"), Some(2));
+        assert_eq!(emb_data.id_from_identifier("nonexistent"), None);
     }
 }

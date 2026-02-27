@@ -39,6 +39,38 @@ impl TryFrom<HashMap<String, String>> for SearchParams {
     }
 }
 
+impl SearchParams {
+    pub fn k(&self) -> usize {
+        match self {
+            SearchParams::Keyword(p) => p.k,
+            SearchParams::Fuzzy(p) => p.k,
+            SearchParams::FullText(p) => p.k,
+            SearchParams::Embedding(p) => p.k,
+        }
+    }
+
+    pub fn bump_k(self) -> Self {
+        match self {
+            SearchParams::Keyword(mut p) => {
+                p.k += 1;
+                SearchParams::Keyword(p)
+            }
+            SearchParams::Fuzzy(mut p) => {
+                p.k += 1;
+                SearchParams::Fuzzy(p)
+            }
+            SearchParams::FullText(mut p) => {
+                p.k += 1;
+                SearchParams::FullText(p)
+            }
+            SearchParams::Embedding(mut p) => {
+                p.k += 1;
+                SearchParams::Embedding(p)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SearchIndex {
     Keyword(KeywordIndex),

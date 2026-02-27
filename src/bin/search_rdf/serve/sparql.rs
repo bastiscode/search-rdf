@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -23,7 +23,8 @@ use spargebra::{Query as SparqlQuery, SparqlParser};
 
 use crate::search_rdf::index::{SearchIndex, SearchParams};
 use crate::search_rdf::serve::search::{
-    MatchInfo, Query, perform_search, perform_search_with_filter,
+    MatchInfo, Query, perform_neighbor_search, perform_neighbor_search_with_filter,
+    perform_search, perform_search_with_filter,
 };
 
 use super::search::SearchMatch;
@@ -83,10 +84,27 @@ fn search_match_to_solution(
     Ok(QuerySolution::from((variables, values)))
 }
 
+fn resolve_to_id(index: &SearchIndex, term: &Term) -> Result<Option<u32>, AppError> {
+    match term {
+        Term::Literal(lit) => {
+            let id = lit.value().parse::<u32>().map_err(|e| {
+                AppError(StatusCode::BAD_REQUEST, anyhow!("Expected integer id: {e}"))
+            })?;
+            Ok(Some(id))
+        }
+        Term::NamedNode(node) => Ok(get_id_from_identifier(index, node.as_str())),
+        _ => Err(AppError(
+            StatusCode::BAD_REQUEST,
+            anyhow!("Expected IRI or integer literal in filter/query column"),
+        )),
+    }
+}
+
 fn get_id_from_identifier(index: &SearchIndex, identifier: &str) -> Option<u32> {
     match index {
         SearchIndex::Keyword(idx) => idx.data().id_from_identifier(identifier),
         SearchIndex::Fuzzy(idx) => idx.data().id_from_identifier(identifier),
+        SearchIndex::FullText(idx) => idx.data().id_from_identifier(identifier),
         SearchIndex::EmbeddingWithData(idx) => idx.data().data().id_from_identifier(identifier),
         _ => None,
     }
@@ -114,7 +132,7 @@ pub async fn service(
         .ok_or_else(|| {
             AppError(
                 StatusCode::BAD_REQUEST,
-                anyhow!("Index not found: {}", index_name),
+                anyhow!("Index not found: {index_name}"),
             )
         })?;
 
@@ -126,10 +144,7 @@ pub async fn service(
 
     // Log the incoming request
     let body = String::from_utf8_lossy(&body);
-    info!(
-        "SERVICE endpoint called for index {}:\n{}",
-        index_name, body
-    );
+    info!("SERVICE endpoint called for index {index_name}:\n{body}");
 
     let SparqlQuery::Select { pattern, .. } =
         SparqlParser::new().parse_query(&body).map_err(|e| {
@@ -204,7 +219,7 @@ pub async fn service(
                             query = Some(Query::Text(lit.value().to_string()));
                         }
                         TermPattern::NamedNode(iri) => {
-                            query = Some(Query::Url(iri.as_str().to_string()));
+                            query = Some(Query::Identifier(iri.as_str().to_string()));
                         }
                         _ => {
                             return Err(AppError(
@@ -271,8 +286,25 @@ pub async fn service(
         )
     })?;
 
-    // perform search
-    let matches = perform_search(index, vec![query], params, model).await?;
+    // perform search — if the query is a known identifier, do neighbor search instead
+    let maybe_neighbor_id = match &query {
+        Query::Identifier(iri) => get_id_from_identifier(&index, iri),
+        _ => None,
+    };
+
+    let matches = if let Some(data_id) = maybe_neighbor_id {
+        vec![perform_neighbor_search(index, data_id, params, model).await?]
+    } else {
+        match query {
+            Query::Identifier(iri) => {
+                return Err(AppError(
+                    StatusCode::BAD_REQUEST,
+                    anyhow!("IRI '{iri}' is not a known identifier in index '{index_name}'"),
+                ))
+            }
+            query => perform_search(index, vec![query], params, model).await?,
+        }
+    };
 
     // write results
     let mut buffer = Vec::new();
@@ -376,10 +408,31 @@ fn serialize_search_matches(
     Ok(buffer)
 }
 
+fn serialize_identifier_mode_matches(
+    pairs: Vec<(Term, Vec<SearchMatch>)>,
+    variables: &[Variable],
+) -> Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+    let mut serializer = QueryResultsSerializer::from_format(QueryResultsFormat::Json)
+        .serialize_solutions_to_writer(&mut buffer, variables.to_vec())
+        .map_err(|e| anyhow!("Failed to create serializer: {}", e))?;
+    let mut rank = 1usize;
+    for (row_term, matches) in pairs {
+        for search_match in matches {
+            let solution =
+                search_match_to_solution(search_match, variables, &[Some(row_term.clone())], rank)?;
+            serializer.serialize(&solution).map_err(|e| anyhow!("{e}"))?;
+            rank += 1;
+        }
+    }
+    serializer.finish().map_err(|e| anyhow!("{e}"))?;
+    Ok(buffer)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct QlProxyParams {
-    // Search parameters (query is required)
-    query: String,
+    // Search parameters (query is optional; if absent, query body column or text is used)
+    query: Option<String>,
     #[serde(default = "default_rowvar")]
     rowvar: String,
     #[serde(flatten)]
@@ -437,8 +490,9 @@ pub async fn qlproxy(
     };
 
     let start = Instant::now();
-    // Parse input bindings - build id_to_row mapping
+    // Parse input bindings - build id_to_row (filter column) and query_items (query column)
     let mut id_to_row: HashMap<u32, Term> = HashMap::new();
+    let mut query_items: Vec<(Term, u32)> = Vec::new();
     for solution_result in solutions.into_iter() {
         let solution = solution_result.map_err(|e| {
             AppError(
@@ -455,52 +509,45 @@ pub async fn qlproxy(
             )
         })?;
 
-        // Get identifier for filter (required)
-        let term = solution.get("identifier").ok_or_else(|| {
-            AppError(
-                StatusCode::BAD_REQUEST,
-                anyhow!("Missing input variable: identifier"),
-            )
-        })?;
-
-        let id = match term {
-            Term::Literal(lit) => {
-                let id = lit.value().parse::<u32>().map_err(|e| {
-                    anyhow!("Expected integer literal representing an Id-based identifier: {e}")
-                })?;
-                Some(id)
-            }
-            Term::NamedNode(node) => get_id_from_identifier(&index, node.as_str()),
-            _ => {
-                return Err(AppError(
-                    StatusCode::BAD_REQUEST,
-                    anyhow!("Expected integer literal or IRI value as identifier"),
-                ));
-            }
-        };
-
-        if let Some(id) = id {
+        // Optional `filter` column — constrains the search space
+        if let Some(term) = solution.get("filter")
+            && let Some(id) = resolve_to_id(&index, term)?
+        {
             id_to_row.insert(id, row_binding.clone());
+        }
+
+        // Optional `query` column — identifier mode: one neighbor search per item
+        if let Some(term) = solution.get("query") {
+            match term {
+                Term::NamedNode(node) => {
+                    if let Some(data_id) = get_id_from_identifier(&index, node.as_str()) {
+                        query_items.push((row_binding.clone(), data_id));
+                    }
+                }
+                _ => {
+                    return Err(AppError(
+                        StatusCode::BAD_REQUEST,
+                        anyhow!("Expected IRI in 'query' body column"),
+                    ));
+                }
+            }
         }
     }
 
     info!(
-        "Filtered to {} identifiers for search in {}ms",
+        "Parsed {} filter entries and {} query items in {}ms",
         id_to_row.len(),
+        query_items.len(),
         start.elapsed().as_millis()
     );
 
-    // Make thread-safe id_to_row map for filtering
-    let id_to_row = Arc::new(id_to_row);
-    let id_to_row_clone = id_to_row.clone();
-    let filter = move |id| id_to_row_clone.contains_key(&id);
-
-    // Prepare query
-    let query = if NamedNode::new(&params.query).is_ok() {
-        Query::Url(params.query)
-    } else {
-        Query::Text(params.query)
-    };
+    // Conflict: cannot specify both HTTP query param and query body column
+    if params.query.is_some() && !query_items.is_empty() {
+        return Err(AppError(
+            StatusCode::BAD_REQUEST,
+            anyhow!("Cannot specify both 'query' HTTP parameter and 'query' body column"),
+        ));
+    }
 
     // parse params
     params.params.insert(
@@ -515,13 +562,6 @@ pub async fn qlproxy(
         )
     })?;
 
-    // Always perform filtered search
-    let start = Instant::now();
-    let matches =
-        perform_search_with_filter(index, vec![query], search_params, model, filter).await?;
-
-    info!("Search completed in {}ms", start.elapsed().as_millis());
-
     // Determine output variables
     let variables = vec![
         Variable::new_unchecked(params.rowvar),
@@ -532,16 +572,82 @@ pub async fn qlproxy(
         Variable::new_unchecked("field"),
     ];
 
-    // Custom values
-    let row_fn = |id: u32| {
-        // Get the row binding from id_to_row map
-        id_to_row
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| anyhow!("No row found for identifier ID {} in search match", id))
+    let start = Instant::now();
+    let response = if !query_items.is_empty() {
+        // Identifier mode: loop over query items, one neighbor search per item
+        let filter_ids: Arc<HashSet<u32>> = Arc::new(id_to_row.keys().copied().collect());
+        let mut identifier_results: Vec<(Term, Vec<SearchMatch>)> = Vec::new();
+        for (row_binding, data_id) in query_items {
+            let fids = filter_ids.clone();
+            let f = move |id| fids.contains(&id);
+            let matches = perform_neighbor_search_with_filter(
+                index.clone(),
+                data_id,
+                search_params.clone(),
+                model,
+                f,
+            )
+            .await?;
+            identifier_results.push((row_binding, matches));
+        }
+        serialize_identifier_mode_matches(identifier_results, &variables)?
+    } else {
+        // Text mode: single search with filter
+        let query_str = params.query.ok_or_else(|| {
+            AppError(
+                StatusCode::BAD_REQUEST,
+                anyhow!("Missing required 'query' HTTP parameter"),
+            )
+        })?;
+
+        let is_iri = NamedNode::new(&query_str).is_ok();
+        let maybe_neighbor_id = if is_iri {
+            get_id_from_identifier(&index, &query_str)
+        } else {
+            None
+        };
+
+        let id_to_row = Arc::new(id_to_row);
+        let id_to_row_filter = id_to_row.clone();
+        let filter = move |id| id_to_row_filter.contains_key(&id);
+
+        let matches = if let Some(data_id) = maybe_neighbor_id {
+            vec![
+                perform_neighbor_search_with_filter(
+                    index,
+                    data_id,
+                    search_params,
+                    model,
+                    filter,
+                )
+                .await?,
+            ]
+        } else if is_iri {
+            return Err(AppError(
+                StatusCode::BAD_REQUEST,
+                anyhow!("IRI '{query_str}' not known in index"),
+            ));
+        } else {
+            perform_search_with_filter(
+                index,
+                vec![Query::Text(query_str)],
+                search_params,
+                model,
+                filter,
+            )
+            .await?
+        };
+
+        let row_fn = move |id: u32| {
+            id_to_row
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| anyhow!("No row for id {id}"))
+        };
+        serialize_search_matches(matches, &variables, row_fn)?
     };
 
-    let response = serialize_search_matches(matches, &variables, row_fn)?;
+    info!("Search completed in {}ms", start.elapsed().as_millis());
 
     // Return as response with correct content type
     Ok(Response::builder()

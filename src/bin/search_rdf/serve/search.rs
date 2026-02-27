@@ -32,7 +32,7 @@ pub struct SearchRequest {
 #[serde(tag = "type", content = "value", rename_all = "lowercase")]
 pub enum Query {
     Text(String),
-    Url(String),
+    Identifier(String),
     Embedding(Embedding),
 }
 
@@ -40,7 +40,7 @@ impl Query {
     pub fn query_type(&self) -> &str {
         match self {
             Query::Text(_) => "text",
-            Query::Url(_) => "url",
+            Query::Identifier(_) => "identifier",
             Query::Embedding(_) => "embedding",
         }
     }
@@ -107,14 +107,14 @@ fn convert_to_search_matches(matches: Vec<Match>, data: &Data) -> Result<Vec<Sea
 }
 
 async fn search_parallel<I: Send + Sync + 'static>(
-    inputs: Vec<I>,
+    inputs: impl IntoIterator<Item = (usize, I)>,
     search_fn: impl Fn(I) -> Result<Vec<SearchMatch>> + Send + Clone + 'static,
-) -> Result<Vec<Vec<SearchMatch>>> {
+) -> Result<Vec<(usize, Vec<SearchMatch>)>> {
     let handles: Vec<_> = inputs
         .into_iter()
-        .map(|input| {
+        .map(|(idx, input)| {
             let f = search_fn.clone();
-            tokio::task::spawn_blocking(move || f(input))
+            tokio::task::spawn_blocking(move || f(input).map(|r| (idx, r)))
         })
         .collect();
 
@@ -141,7 +141,7 @@ pub fn embed_query(
             .flatten()
             .next()
             .ok_or_else(|| anyhow!("Failed to embed query using VLLM model")),
-        (Query::Url(url), EmbeddingModel::HuggingFaceImage(m)) => {
+        (Query::Text(url), EmbeddingModel::HuggingFaceImage(m)) => {
             let image =
                 load_image_ndarray_from_url(&url).context("Failed to load image from URL")?;
             m.embed(&[&image], params)
@@ -174,7 +174,7 @@ pub async fn perform_search_with_filter(
                 return Err(anyhow!("Invalid search parameters for keyword index"));
             };
 
-            search_parallel(queries, move |query| {
+            search_parallel(queries.into_iter().enumerate(), move |query| {
                 let Query::Text(query) = query else {
                     return Err(anyhow!("Non-text query provided to keyword index"));
                 };
@@ -183,13 +183,14 @@ pub async fn perform_search_with_filter(
                 convert_to_search_matches(matches, index.data())
             })
             .await
+            .map(|results| results.into_iter().map(|(_, r)| r).collect())
         }
         SearchIndex::Fuzzy(index) => {
             let SearchParams::Fuzzy(search_params) = params else {
                 return Err(anyhow!("Invalid search parameters for fuzzy index"));
             };
 
-            search_parallel(queries, move |query| {
+            search_parallel(queries.into_iter().enumerate(), move |query| {
                 let Query::Text(query) = query else {
                     return Err(anyhow!("Non-text query provided to fuzzy index"));
                 };
@@ -198,13 +199,14 @@ pub async fn perform_search_with_filter(
                 convert_to_search_matches(matches, index.data())
             })
             .await
+            .map(|results| results.into_iter().map(|(_, r)| r).collect())
         }
         SearchIndex::FullText(index) => {
             let SearchParams::FullText(search_params) = params else {
                 return Err(anyhow!("Invalid search parameters for full-text index"));
             };
 
-            search_parallel(queries, move |query| {
+            search_parallel(queries.into_iter().enumerate(), move |query| {
                 let Query::Text(query) = query else {
                     return Err(anyhow!("Non-text query provided to full-text index"));
                 };
@@ -213,6 +215,7 @@ pub async fn perform_search_with_filter(
                 convert_to_search_matches(matches, index.data())
             })
             .await
+            .map(|results| results.into_iter().map(|(_, r)| r).collect())
         }
         SearchIndex::EmbeddingWithData(index) => {
             let SearchParams::Embedding(search_params) = params else {
@@ -224,12 +227,13 @@ pub async fn perform_search_with_filter(
                 return Err(anyhow!("No embedding model specified for embedding search"));
             };
 
-            search_parallel(queries, move |query| {
+            search_parallel(queries.into_iter().enumerate(), move |query| {
                 let emb = embed_query(query, &model, &model_params)?;
                 let matches = index.search_with_filter(&emb, &search_params, filter.clone())?;
                 convert_to_search_matches(matches, index.data().data())
             })
             .await
+            .map(|results| results.into_iter().map(|(_, r)| r).collect())
         }
         _ => Err(anyhow!(
             "Filtered search is not supported for this index type"
@@ -252,7 +256,7 @@ pub async fn perform_search(
                 return Err(anyhow!("Invalid search parameters for keyword index"));
             };
 
-            search_parallel(queries, move |query| {
+            search_parallel(queries.into_iter().enumerate(), move |query| {
                 let Query::Text(query) = query else {
                     return Err(anyhow!("Non-text query provided to keyword index"));
                 };
@@ -260,13 +264,14 @@ pub async fn perform_search(
                 convert_to_search_matches(matches, index.data())
             })
             .await
+            .map(|results| results.into_iter().map(|(_, r)| r).collect())
         }
         SearchIndex::Fuzzy(index) => {
             let SearchParams::Fuzzy(search_params) = params else {
                 return Err(anyhow!("Invalid search parameters for fuzzy index"));
             };
 
-            search_parallel(queries, move |query| {
+            search_parallel(queries.into_iter().enumerate(), move |query| {
                 let Query::Text(query) = query else {
                     return Err(anyhow!("Non-text query provided to fuzzy index"));
                 };
@@ -274,13 +279,14 @@ pub async fn perform_search(
                 convert_to_search_matches(matches, index.data())
             })
             .await
+            .map(|results| results.into_iter().map(|(_, r)| r).collect())
         }
         SearchIndex::FullText(index) => {
             let SearchParams::FullText(search_params) = params else {
                 return Err(anyhow!("Invalid search parameters for full-text index"));
             };
 
-            search_parallel(queries, move |query| {
+            search_parallel(queries.into_iter().enumerate(), move |query| {
                 let Query::Text(query) = query else {
                     return Err(anyhow!("Non-text query provided to full-text index"));
                 };
@@ -288,6 +294,7 @@ pub async fn perform_search(
                 convert_to_search_matches(matches, index.data())
             })
             .await
+            .map(|results| results.into_iter().map(|(_, r)| r).collect())
         }
         SearchIndex::EmbeddingWithData(index) => {
             let SearchParams::Embedding(search_params) = params else {
@@ -299,14 +306,167 @@ pub async fn perform_search(
                 return Err(anyhow!("No embedding model specified for embedding search"));
             };
 
-            search_parallel(queries, move |query| {
+            search_parallel(queries.into_iter().enumerate(), move |query| {
                 let emb = embed_query(query, &model, &model_params)?;
                 let matches = index.search(&emb, &search_params)?;
                 convert_to_search_matches(matches, index.data().data())
             })
             .await
+            .map(|results| results.into_iter().map(|(_, r)| r).collect())
         }
         _ => Err(anyhow!("Search is not supported for this index type")),
+    }
+}
+
+/// Extract queries for neighbor search from an item's fields.
+/// For text indices returns one Query::Text per field; for embedding returns one Query::Embedding.
+fn get_neighbor_queries(index: &SearchIndex, data_id: u32) -> Result<Vec<Query>> {
+    match index {
+        SearchIndex::Keyword(idx) => idx
+            .data()
+            .fields(data_id)
+            .ok_or_else(|| anyhow!("Item {} not found in keyword index", data_id))
+            .map(|fields| fields.map(|f| Query::Text(f.as_str().to_string())).collect()),
+        SearchIndex::Fuzzy(idx) => idx
+            .data()
+            .fields(data_id)
+            .ok_or_else(|| anyhow!("Item {} not found in fuzzy index", data_id))
+            .map(|fields| fields.map(|f| Query::Text(f.as_str().to_string())).collect()),
+        SearchIndex::FullText(idx) => idx
+            .data()
+            .fields(data_id)
+            .ok_or_else(|| anyhow!("Item {} not found in full-text index", data_id))
+            .map(|fields| fields.map(|f| Query::Text(f.as_str().to_string())).collect()),
+        SearchIndex::EmbeddingWithData(idx) => idx
+            .field_embeddings(data_id)
+            .ok_or_else(|| anyhow!("Item {} not found in embedding index", data_id))
+            .map(|embs| embs.map(|e| Query::Embedding(e.to_vec())).collect()),
+        SearchIndex::Embedding(_) => Err(anyhow!(
+            "Neighbor search by identifier is not supported for plain embedding index"
+        )),
+    }
+}
+
+/// Merge per-field match lists into a single list, keeping the best score per item id.
+/// Results are sorted by score descending and truncated to `k`.
+fn merge_matches(results: Vec<Vec<SearchMatch>>, k: usize) -> Vec<SearchMatch> {
+    let mut best_score: HashMap<u32, f32> = HashMap::new();
+    let mut by_id: HashMap<u32, SearchMatch> = HashMap::new();
+
+    for m in results.into_iter().flatten() {
+        let prev = best_score.get(&m.id).copied().unwrap_or(f32::NEG_INFINITY);
+        if m.score > prev {
+            best_score.insert(m.id, m.score);
+            by_id.insert(m.id, m);
+        }
+    }
+
+    let mut merged: Vec<SearchMatch> = by_id.into_values().collect();
+    merged.sort_unstable_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    merged.truncate(k);
+    merged
+}
+
+/// Find the top-k neighbors of a known item, excluding the item itself.
+///
+/// Uses the k+1 trick: searches for k+1 results via approximate search, then post-filters
+/// self from each field result set before merging. This avoids the expensive exact/linear
+/// scan that `search_with_filter` would otherwise impose on HNSW indices.
+pub async fn perform_neighbor_search(
+    index: SearchIndex,
+    data_id: u32,
+    params: SearchParams,
+    model: Option<&(EmbeddingModel, EmbeddingParams)>,
+) -> Result<Vec<SearchMatch>> {
+    let k = params.k();
+    let queries = get_neighbor_queries(&index, data_id)?;
+    let all_results = perform_search(index, queries, params.bump_k(), model).await?;
+    let filtered: Vec<Vec<SearchMatch>> = all_results
+        .into_iter()
+        .map(|field_results| {
+            field_results
+                .into_iter()
+                .filter(|m| m.id != data_id)
+                .collect()
+        })
+        .collect();
+    Ok(merge_matches(filtered, k))
+}
+
+/// Find the top-k neighbors of a known item with an additional filter, excluding the item itself.
+///
+/// Combines self-exclusion with the provided filter and delegates to `search_with_filter`.
+pub async fn perform_neighbor_search_with_filter(
+    index: SearchIndex,
+    data_id: u32,
+    params: SearchParams,
+    model: Option<&(EmbeddingModel, EmbeddingParams)>,
+    filter: impl Fn(u32) -> bool + Clone + Send + 'static,
+) -> Result<Vec<SearchMatch>> {
+    let k = params.k();
+    let queries = get_neighbor_queries(&index, data_id)?;
+    let combined_filter = move |id: u32| id != data_id && filter(id);
+    let all_results =
+        perform_search_with_filter(index, queries, params, model, combined_filter).await?;
+    Ok(merge_matches(all_results, k))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_search_parallel_preserves_index() {
+        // Each input yields one match; the returned usize must match the input index.
+        let results = search_parallel((0u32..3).map(|i| (i as usize, i)), |v| {
+            Ok(vec![SearchMatch::new(v, v as f32, MatchInfo::None)])
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(results.len(), 3);
+        for (idx, matches) in &results {
+            assert_eq!(matches.len(), 1);
+            assert_eq!(matches[0].id, *idx as u32);
+            assert_eq!(matches[0].score, *idx as f32);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_search_parallel_groups_by_index() {
+        // Simulate two query items (index 0 and 1), each with 2 field embeddings.
+        // The caller is responsible for grouping and merging; here we just verify
+        // that the usize tag is threaded through correctly.
+        let inputs = vec![(0usize, 10u32), (0, 11), (1, 20), (1, 21)];
+        let results = search_parallel(inputs, |v| {
+            Ok(vec![SearchMatch::new(v, v as f32, MatchInfo::None)])
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(results.len(), 4);
+
+        let mut by_index: std::collections::HashMap<usize, Vec<u32>> =
+            std::collections::HashMap::new();
+        for (idx, matches) in results {
+            for m in matches {
+                by_index.entry(idx).or_default().push(m.id);
+            }
+        }
+
+        assert_eq!(by_index.len(), 2, "should have exactly 2 groups");
+
+        let mut ids_0 = by_index[&0].clone();
+        ids_0.sort_unstable();
+        assert_eq!(ids_0, vec![10, 11]);
+
+        let mut ids_1 = by_index[&1].clone();
+        ids_1.sort_unstable();
+        assert_eq!(ids_1, vec![20, 21]);
     }
 }
 
