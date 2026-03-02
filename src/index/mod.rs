@@ -4,7 +4,9 @@ pub mod text;
 
 use crate::data::DataSource;
 use anyhow::Result;
+use itertools::Itertools;
 use pyo3::IntoPyObject;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -62,19 +64,23 @@ pub fn merge_neighbor_matches<T: Scored>(results: Vec<Vec<T>>, k: usize) -> Vec<
     for m in results.into_iter().flatten() {
         let id = m.id();
         let score = m.score();
-        let prev = best.get(&id).map(|m| m.score()).unwrap_or(f32::NEG_INFINITY);
+        let prev = best
+            .get(&id)
+            .map(|m| m.score())
+            .unwrap_or(f32::NEG_INFINITY);
         if score > prev {
             best.insert(id, m);
         }
     }
-    let mut merged: Vec<T> = best.into_values().collect();
-    merged.sort_unstable_by(|a, b| {
-        b.score()
-            .partial_cmp(&a.score())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    merged.truncate(k);
-    merged
+    best.into_values()
+        .sorted_unstable_by(|a, b| {
+            b.score()
+                .partial_cmp(&a.score())
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.id().cmp(&b.id()))
+        })
+        .take(k)
+        .collect()
 }
 
 // for use with serde defaults
