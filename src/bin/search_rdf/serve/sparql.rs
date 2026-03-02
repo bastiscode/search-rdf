@@ -385,7 +385,7 @@ pub async fn service(
 fn serialize_search_matches(
     matches: Vec<Vec<SearchMatch>>,
     variables: &[Variable],
-    row_fn: impl Fn(u32) -> Result<Term>,
+    row_fn: impl Fn(u32) -> Option<Term>,
 ) -> Result<Vec<u8>> {
     let mut buffer = Vec::new();
     let mut serializer = QueryResultsSerializer::from_format(QueryResultsFormat::Json)
@@ -393,7 +393,9 @@ fn serialize_search_matches(
         .map_err(|e| anyhow!("Failed to create serializer: {}", e))?;
 
     for (rank, search_match) in matches.into_iter().flatten().enumerate() {
-        let row = row_fn(search_match.id)?;
+        let Some(row) = row_fn(search_match.id) else {
+            continue;
+        };
         let solution = search_match_to_solution(search_match, variables, &[Some(row)], rank + 1)?;
 
         serializer
@@ -650,12 +652,7 @@ pub async fn qlproxy(
             perform_search(index, vec![Query::Text(query_str)], search_params, model).await?
         };
 
-        let row_fn = move |id: u32| {
-            id_to_row
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| anyhow!("No row for id {id}"))
-        };
+        let row_fn = move |id: u32| id_to_row.get(&id).cloned();
         serialize_search_matches(matches, &variables, row_fn)?
     };
 
