@@ -23,8 +23,8 @@ use spargebra::{Query as SparqlQuery, SparqlParser};
 
 use crate::search_rdf::index::{SearchIndex, SearchParams};
 use crate::search_rdf::serve::search::{
-    MatchInfo, Query, perform_neighbor_search, perform_neighbor_search_with_filter,
-    perform_search, perform_search_with_filter,
+    MatchInfo, Query, perform_neighbor_search, perform_neighbor_search_with_filter, perform_search,
+    perform_search_with_filter,
 };
 
 use super::search::SearchMatch;
@@ -300,7 +300,7 @@ pub async fn service(
                 return Err(AppError(
                     StatusCode::BAD_REQUEST,
                     anyhow!("IRI '{iri}' is not a known identifier in index '{index_name}'"),
-                ))
+                ));
             }
             query => perform_search(index, vec![query], params, model).await?,
         }
@@ -421,7 +421,9 @@ fn serialize_identifier_mode_matches(
         for search_match in matches {
             let solution =
                 search_match_to_solution(search_match, variables, &[Some(row_term.clone())], rank)?;
-            serializer.serialize(&solution).map_err(|e| anyhow!("{e}"))?;
+            serializer
+                .serialize(&solution)
+                .map_err(|e| anyhow!("{e}"))?;
             rank += 1;
         }
     }

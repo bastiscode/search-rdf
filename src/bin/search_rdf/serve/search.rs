@@ -346,7 +346,6 @@ fn get_neighbor_queries(index: &SearchIndex, data_id: u32) -> Result<Vec<Query>>
     }
 }
 
-
 /// Find the top-k neighbors of a known item, excluding the item itself.
 ///
 /// Uses the k+1 trick: searches for k+1 results via approximate search, then post-filters

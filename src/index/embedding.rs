@@ -374,10 +374,7 @@ impl EmbeddingIndex {
 
         let predicate = filter.map(|f| {
             let data = data.clone();
-            move |field_id: u64| {
-                data.data_id_for_field(field_id as usize)
-                    .is_some_and(&f)
-            }
+            move |field_id: u64| data.data_id_for_field(field_id as usize).is_some_and(&f)
         });
 
         let mut matches = Self::search(
@@ -425,7 +422,6 @@ impl EmbeddingIndex {
 
         Ok(matches)
     }
-
 }
 
 impl Search for EmbeddingIndex {
@@ -1371,11 +1367,7 @@ mod embedding_index_tests {
                     precision
                 );
                 if let Match::WithField(data_id, _, _) = results_filtered[0] {
-                    assert_ne!(
-                        data_id, 0,
-                        "Filter failed for {:?} {:?}",
-                        metric, precision
-                    );
+                    assert_ne!(data_id, 0, "Filter failed for {:?} {:?}", metric, precision);
                 } else {
                     panic!("Expected Match::WithField for {:?} {:?}", metric, precision);
                 }
@@ -1405,9 +1397,8 @@ mod embedding_index_tests {
             vec![0.0f32, 2.0, 0.0, 0.0],
             vec![0.0f32, 0.0, 2.0, 0.0],
         ];
-        let emb_data_ip =
-            build_test_data_with_embeddings(&data_dir_ip, items_ip, embeddings_ip)
-                .expect("Failed to build EmbeddingsWithData");
+        let emb_data_ip = build_test_data_with_embeddings(&data_dir_ip, items_ip, embeddings_ip)
+            .expect("Failed to build EmbeddingsWithData");
 
         for precision in &precisions {
             let index_dir = temp_dir
@@ -1488,8 +1479,8 @@ mod embedding_index_tests {
             .with_precision(Precision::Binary);
         EmbeddingIndexWithData::build(&emb_data_h, &index_dir_h, &params_h)
             .expect("Failed to build index");
-        let index_h = EmbeddingIndexWithData::load(emb_data_h, &index_dir_h)
-            .expect("Failed to load index");
+        let index_h =
+            EmbeddingIndexWithData::load(emb_data_h, &index_dir_h).expect("Failed to load index");
 
         let mut query_h = vec![1.0f32; 16];
         query_h.extend(vec![0.0f32; 16]);
@@ -1709,11 +1700,7 @@ mod embedding_index_tests {
                 fields: vec![Field::text("c")],
             },
         ];
-        let embeddings = vec![
-            vec![1.0f32, 0.0],
-            vec![0.0f32, 1.0],
-            vec![0.7f32, 0.7],
-        ];
+        let embeddings = vec![vec![1.0f32, 0.0], vec![0.0f32, 1.0], vec![0.7f32, 0.7]];
 
         let emb_data = build_test_data_with_embeddings(&data_dir, items, embeddings)
             .expect("Failed to build EmbeddingsWithData");
