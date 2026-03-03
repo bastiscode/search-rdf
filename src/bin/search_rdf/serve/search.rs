@@ -604,4 +604,78 @@ mod tests {
         ids_1.sort_unstable();
         assert_eq!(ids_1, vec![20, 21]);
     }
+
+    #[test]
+    fn test_looks_like_url() {
+        assert!(looks_like_url("http://example.com/cat.jpg"));
+        assert!(looks_like_url("https://example.com/cat.jpg"));
+        assert!(looks_like_url("file:///path/to/image.png"));
+        assert!(!looks_like_url("a photo of a cat"));
+        assert!(!looks_like_url("iVBORw0KGgo..."));
+        assert!(!looks_like_url(""));
+    }
+
+    #[test]
+    fn test_modality_serde_roundtrip() {
+        assert_eq!(
+            serde_plain::from_str::<Modality>("text").unwrap(),
+            Modality::Text
+        );
+        assert_eq!(
+            serde_plain::from_str::<Modality>("image").unwrap(),
+            Modality::Image
+        );
+        assert_eq!(
+            serde_plain::from_str::<Modality>("image-base64").unwrap(),
+            Modality::ImageBase64
+        );
+        assert_eq!(
+            serde_plain::from_str::<Modality>("iri").unwrap(),
+            Modality::Iri
+        );
+        assert!(serde_plain::from_str::<Modality>("unknown").is_err());
+    }
+
+    #[test]
+    fn test_query_deser_value_default_modality() {
+        let q: Query = serde_json::from_str(r#"{"type": "value", "value": "a cat"}"#).unwrap();
+        let Query::Value { value, modality } = q else {
+            panic!("expected Value variant");
+        };
+        assert_eq!(value, "a cat");
+        assert_eq!(modality, None);
+    }
+
+    #[test]
+    fn test_query_deser_value_explicit_modality() {
+        let q: Query =
+            serde_json::from_str(r#"{"type": "value", "value": "http://x", "modality": "image"}"#)
+                .unwrap();
+        let Query::Value { value, modality } = q else {
+            panic!("expected Value variant");
+        };
+        assert_eq!(value, "http://x");
+        assert_eq!(modality, Some(Modality::Image));
+    }
+
+    #[test]
+    fn test_query_deser_identifier() {
+        let q: Query =
+            serde_json::from_str(r#"{"type": "identifier", "value": "http://example.org/Q42"}"#)
+                .unwrap();
+        let Query::Identifier { value } = q else {
+            panic!("expected Identifier variant");
+        };
+        assert_eq!(value, "http://example.org/Q42");
+    }
+
+    #[test]
+    fn test_query_deser_embedding() {
+        let q: Query =
+            serde_json::from_str(r#"{"type": "embedding", "value": [0.1, 0.2, 0.3]}"#).unwrap();
+        let Query::Embedding { value } = q else {
+            panic!("expected Embedding variant");
+        };
+        assert_eq!(value, vec![0.1, 0.2, 0.3]);
+    }
 }
