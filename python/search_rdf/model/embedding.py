@@ -1,4 +1,6 @@
-"""Text embedding using sentence-transformers."""
+"""Embedding models for text, images, and multi-modal (OpenCLIP)."""
+
+from __future__ import annotations
 
 import numpy as np
 import torch
@@ -151,3 +153,100 @@ class ImageEmbeddingModel:
         embeddings = np.vstack(full_embeddings)
 
         return embeddings.astype(np.float32)
+
+
+class OpenClipModel:
+    """Multi-modal embedding model using OpenCLIP.
+
+    Produces text and image embeddings in a shared vector space.
+
+    Args:
+        model: HF hub path (e.g. ``hf-hub:laion/CLIP-ViT-B-32-laion2B-s34B-b79K``)
+               or local path.
+        device: Device for inference ('cuda', 'cpu', or None for auto).
+    """
+
+    def __init__(self, model: str, device: str | None = None):
+        import open_clip
+
+        self.model_name = model
+        clip_model, self.preprocess = open_clip.create_model_from_pretrained(model)
+        if device is not None:
+            clip_model = clip_model.to(device)
+        self.device = next(clip_model.parameters()).device
+        clip_model.eval()
+        self.clip_model = clip_model
+        self.tokenizer = open_clip.get_tokenizer(model)
+
+        # Determine embedding dimension via a dummy forward pass
+        with torch.inference_mode():
+            dummy = self.tokenizer(["hello"]).to(self.device)
+            dummy_emb = self.clip_model.encode_text(dummy)
+            self.dim: int = dummy_emb.shape[-1]
+
+    def embed_text(
+        self,
+        texts: list[str],
+        batch_size: int | None = None,
+        normalize: bool = True,
+        show_progress: bool = False,
+    ) -> np.ndarray:
+        if not texts:
+            return np.empty((0, self.dim), dtype=np.float32)
+
+        if batch_size is None:
+            batch_size = len(texts)
+
+        all_embeddings = []
+        for i in trange(
+            0,
+            len(texts),
+            batch_size,
+            desc="OpenCLIP text embeddings",
+            disable=not show_progress,
+        ):
+            batch = texts[i : i + batch_size]
+            tokens = self.tokenizer(batch).to(self.device)
+            with torch.inference_mode():
+                emb = self.clip_model.encode_text(tokens)
+            if normalize:
+                emb = F.normalize(emb)
+            all_embeddings.append(emb.cpu().numpy())
+
+        return np.vstack(all_embeddings).astype(np.float32)
+
+    def embed_image(
+        self,
+        images: list[np.ndarray],
+        batch_size: int | None = None,
+        normalize: bool = True,
+        show_progress: bool = False,
+    ) -> np.ndarray:
+        from PIL import Image
+
+        if not images:
+            return np.empty((0, self.dim), dtype=np.float32)
+
+        if batch_size is None:
+            batch_size = len(images)
+
+        all_embeddings = []
+        for i in trange(
+            0,
+            len(images),
+            batch_size,
+            desc="OpenCLIP image embeddings",
+            disable=not show_progress,
+        ):
+            batch = images[i : i + batch_size]
+            pil_images = [Image.fromarray(img) for img in batch]
+            tensors = torch.stack([self.preprocess(img) for img in pil_images]).to(
+                self.device
+            )
+            with torch.inference_mode():
+                emb = self.clip_model.encode_image(tensors)
+            if normalize:
+                emb = F.normalize(emb)
+            all_embeddings.append(emb.cpu().numpy())
+
+        return np.vstack(all_embeddings).astype(np.float32)

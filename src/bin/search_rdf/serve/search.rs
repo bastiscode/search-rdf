@@ -4,9 +4,11 @@ use anyhow::{Context, Result, anyhow};
 use axum::extract::{Json, Path as AxumPath, State};
 use axum::http::StatusCode;
 use futures::future::try_join_all;
+use numpy::ndarray::Array3;
 use search_rdf::data::embedding::Embedding;
-use search_rdf::data::item::load_image_ndarray_from_url;
+use search_rdf::data::item::{load_image_ndarray_from_base64, load_image_ndarray_from_url};
 use search_rdf::model::EmbeddingParams;
+use search_rdf::model::multimodal::MultiModalInput;
 use serde::{Deserialize, Serialize};
 
 use search_rdf::{
@@ -28,20 +30,36 @@ pub struct SearchRequest {
     params: HashMap<String, Value>,
 }
 
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Modality {
+    Text,
+    Image,
+    ImageBase64,
+    Iri,
+}
+
 #[derive(Deserialize)]
-#[serde(tag = "type", content = "value", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Query {
-    Text(String),
-    Identifier(String),
-    Embedding(Embedding),
+    Value {
+        value: String,
+        modality: Option<Modality>,
+    },
+    Identifier {
+        value: String,
+    },
+    Embedding {
+        value: Embedding,
+    },
 }
 
 impl Query {
     pub fn query_type(&self) -> &str {
         match self {
-            Query::Text(_) => "text",
-            Query::Identifier(_) => "identifier",
-            Query::Embedding(_) => "embedding",
+            Query::Value { .. } => "value",
+            Query::Identifier { .. } => "identifier",
+            Query::Embedding { .. } => "embedding",
         }
     }
 }
@@ -131,39 +149,111 @@ async fn search_parallel<I: Send + Sync + 'static>(
     results.into_iter().collect()
 }
 
+fn looks_like_url(value: &str) -> bool {
+    value.starts_with("http://") || value.starts_with("https://") || value.starts_with("file://")
+}
+
+/// Guess the modality for a query value based on the model and value content.
+///
+/// Heuristics:
+/// - Text-only models (SentenceTransformer, Vllm): always `Text`
+/// - Image-only model (HuggingFaceImage): `Image` if value looks like a URL,
+///   otherwise `ImageBase64` (since this model only accepts images)
+/// - Multi-modal (OpenClip): `Image` if value looks like a URL, otherwise `Text`
+///   (base64 must be specified explicitly since it's indistinguishable from text)
+fn guess_modality(value: &str, model: &EmbeddingModel) -> Modality {
+    match model {
+        EmbeddingModel::SentenceTransformer(_) | EmbeddingModel::Vllm(_) => Modality::Text,
+        EmbeddingModel::HuggingFaceImage(_) => {
+            if looks_like_url(value) {
+                Modality::Image
+            } else {
+                Modality::ImageBase64
+            }
+        }
+        EmbeddingModel::OpenClip(_) => {
+            if looks_like_url(value) {
+                Modality::Image
+            } else {
+                Modality::Text
+            }
+        }
+    }
+}
+
+fn load_image_query(value: &str, modality: Modality) -> Result<Array3<u8>> {
+    match modality {
+        Modality::Image => {
+            load_image_ndarray_from_url(value).context("Failed to load image from URL")
+        }
+        Modality::ImageBase64 => {
+            load_image_ndarray_from_base64(value).context("Failed to decode base64 image")
+        }
+        Modality::Text | Modality::Iri => {
+            Err(anyhow!("Expected image modality, got {:?}", modality))
+        }
+    }
+}
+
 pub fn embed_query(
     query: Query,
     model: &EmbeddingModel,
     params: &EmbeddingParams,
 ) -> Result<Embedding> {
-    match (query, model) {
-        (Query::Embedding(emb), _) => Ok(emb),
-        (Query::Text(text), EmbeddingModel::SentenceTransformer(m)) => m
-            .embed(&[text], params)
-            .into_iter()
-            .flatten()
-            .next()
-            .ok_or_else(|| anyhow!("Failed to embed query using sentence transformer model")),
-        (Query::Text(text), EmbeddingModel::Vllm(m)) => m
-            .embed(&[text], params)
-            .into_iter()
-            .flatten()
-            .next()
-            .ok_or_else(|| anyhow!("Failed to embed query using VLLM model")),
-        (Query::Text(url), EmbeddingModel::HuggingFaceImage(m)) => {
-            let image =
-                load_image_ndarray_from_url(&url).context("Failed to load image from URL")?;
-            m.embed(&[&image], params)
-                .into_iter()
-                .flatten()
-                .next()
-                .ok_or_else(|| anyhow!("Failed to embed image query"))
+    match query {
+        Query::Embedding { value } => Ok(value),
+        Query::Value { value, modality } => {
+            let modality = modality.unwrap_or_else(|| guess_modality(&value, model));
+            match (modality, model) {
+                (Modality::Text, EmbeddingModel::SentenceTransformer(m)) => m
+                    .embed(&[value], params)?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        anyhow!("Failed to embed query using sentence transformer model")
+                    }),
+                (Modality::Text, EmbeddingModel::Vllm(m)) => m
+                    .embed(&[value], params)?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("Failed to embed query using VLLM model")),
+                (Modality::Text, EmbeddingModel::OpenClip(m)) => m
+                    .embed(&[MultiModalInput::Text(value)], params)?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("Failed to embed text query using OpenCLIP model")),
+                (
+                    modality @ (Modality::Image | Modality::ImageBase64),
+                    EmbeddingModel::OpenClip(m),
+                ) => {
+                    let image = load_image_query(&value, modality)?;
+                    m.embed(&[MultiModalInput::Image(image)], params)?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| anyhow!("Failed to embed image query using OpenCLIP model"))
+                }
+                (
+                    modality @ (Modality::Image | Modality::ImageBase64),
+                    EmbeddingModel::HuggingFaceImage(m),
+                ) => {
+                    let image = load_image_query(&value, modality)?;
+                    m.embed(&[&image], params)?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| anyhow!("Failed to embed image query"))
+                }
+                (modality, model) => Err(anyhow!(
+                    "Cannot embed {:?} query with model {} of type {}",
+                    modality,
+                    model.model_name(),
+                    model.model_type()
+                )),
+            }
         }
-        (query, model) => Err(anyhow!(
-            "Cannot embed query of type {} with model {} of type {}",
+        query => Err(anyhow!(
+            "Cannot embed query of type {} with model {}",
             query.query_type(),
-            model.model_name(),
-            model.model_type()
+            model.model_name()
         )),
     }
 }
@@ -184,7 +274,11 @@ pub async fn perform_search_with_filter(
             };
 
             search_parallel(queries.into_iter().enumerate(), move |query| {
-                let Query::Text(query) = query else {
+                let Query::Value {
+                    value: query,
+                    modality: None | Some(Modality::Text),
+                } = query
+                else {
                     return Err(anyhow!("Non-text query provided to keyword index"));
                 };
                 let matches =
@@ -200,7 +294,11 @@ pub async fn perform_search_with_filter(
             };
 
             search_parallel(queries.into_iter().enumerate(), move |query| {
-                let Query::Text(query) = query else {
+                let Query::Value {
+                    value: query,
+                    modality: None | Some(Modality::Text),
+                } = query
+                else {
                     return Err(anyhow!("Non-text query provided to fuzzy index"));
                 };
                 let matches =
@@ -216,7 +314,11 @@ pub async fn perform_search_with_filter(
             };
 
             search_parallel(queries.into_iter().enumerate(), move |query| {
-                let Query::Text(query) = query else {
+                let Query::Value {
+                    value: query,
+                    modality: None | Some(Modality::Text),
+                } = query
+                else {
                     return Err(anyhow!("Non-text query provided to full-text index"));
                 };
                 let matches =
@@ -266,7 +368,11 @@ pub async fn perform_search(
             };
 
             search_parallel(queries.into_iter().enumerate(), move |query| {
-                let Query::Text(query) = query else {
+                let Query::Value {
+                    value: query,
+                    modality: None | Some(Modality::Text),
+                } = query
+                else {
                     return Err(anyhow!("Non-text query provided to keyword index"));
                 };
                 let matches = index.search(query.as_str(), &search_params)?;
@@ -281,7 +387,11 @@ pub async fn perform_search(
             };
 
             search_parallel(queries.into_iter().enumerate(), move |query| {
-                let Query::Text(query) = query else {
+                let Query::Value {
+                    value: query,
+                    modality: None | Some(Modality::Text),
+                } = query
+                else {
                     return Err(anyhow!("Non-text query provided to fuzzy index"));
                 };
                 let matches = index.search(query.as_str(), &search_params)?;
@@ -296,7 +406,11 @@ pub async fn perform_search(
             };
 
             search_parallel(queries.into_iter().enumerate(), move |query| {
-                let Query::Text(query) = query else {
+                let Query::Value {
+                    value: query,
+                    modality: None | Some(Modality::Text),
+                } = query
+                else {
                     return Err(anyhow!("Non-text query provided to full-text index"));
                 };
                 let matches = index.search(query.as_str(), &search_params)?;
@@ -334,18 +448,23 @@ fn get_neighbor_queries(index: &SearchIndex, data_id: u32) -> Result<Vec<Query>>
         SearchIndex::EmbeddingWithData(idx) => idx
             .field_embeddings(data_id)
             .ok_or_else(|| anyhow!("Item {} not found in embedding index", data_id))
-            .map(|embs| embs.map(|e| Query::Embedding(e.to_vec())).collect()),
+            .map(|embs| {
+                embs.map(|e| Query::Embedding { value: e.to_vec() })
+                    .collect()
+            }),
         SearchIndex::Embedding(idx) => idx
             .data()
             .fields(data_id)
             .ok_or_else(|| anyhow!("Item {} not found in embedding index", data_id))
-            .map(|embs| embs.map(|e| Query::Embedding(e.to_vec())).collect()),
+            .map(|embs| {
+                embs.map(|e| Query::Embedding { value: e.to_vec() })
+                    .collect()
+            }),
         _ => Err(anyhow!(
             "Neighbor search is only supported for embedding indices"
         )),
     }
 }
-
 
 /// Find the top-k neighbors of a known item, excluding the item itself.
 ///
@@ -389,6 +508,47 @@ pub async fn perform_neighbor_search_with_filter(
     let all_results =
         perform_search_with_filter(index, queries, params, model, combined_filter).await?;
     Ok(merge_neighbor_matches(all_results, k))
+}
+
+pub async fn search(
+    AxumPath(index_name): AxumPath<String>,
+    State(state): State<AppState>,
+    Json(mut req): Json<SearchRequest>,
+) -> Result<Json<SearchResponse>, AppError> {
+    let index = state
+        .inner
+        .indices
+        .get(&index_name)
+        .cloned()
+        .ok_or_else(|| {
+            AppError(
+                StatusCode::BAD_REQUEST,
+                anyhow!("Index not found: {}", index_name),
+            )
+        })?;
+
+    let model = state
+        .inner
+        .index_to_model
+        .get(&index_name)
+        .and_then(|model_name| state.inner.models.get(model_name));
+
+    // parse params
+    req.params.insert(
+        "type".to_string(),
+        Value::String(index.index_type().to_string()),
+    );
+
+    let params = SearchParams::deserialize(json!(req.params)).map_err(|e| {
+        AppError(
+            StatusCode::BAD_REQUEST,
+            anyhow!("Failed to parse search parameters: {}", e),
+        )
+    })?;
+
+    let matches = perform_search(index, req.queries, params, model).await?;
+
+    Ok(Json(SearchResponse { matches }))
 }
 
 #[cfg(test)]
@@ -444,45 +604,4 @@ mod tests {
         ids_1.sort_unstable();
         assert_eq!(ids_1, vec![20, 21]);
     }
-}
-
-pub async fn search(
-    AxumPath(index_name): AxumPath<String>,
-    State(state): State<AppState>,
-    Json(mut req): Json<SearchRequest>,
-) -> Result<Json<SearchResponse>, AppError> {
-    let index = state
-        .inner
-        .indices
-        .get(&index_name)
-        .cloned()
-        .ok_or_else(|| {
-            AppError(
-                StatusCode::BAD_REQUEST,
-                anyhow!("Index not found: {}", index_name),
-            )
-        })?;
-
-    let model = state
-        .inner
-        .index_to_model
-        .get(&index_name)
-        .and_then(|model_name| state.inner.models.get(model_name));
-
-    // parse params
-    req.params.insert(
-        "type".to_string(),
-        Value::String(index.index_type().to_string()),
-    );
-
-    let params = SearchParams::deserialize(json!(req.params)).map_err(|e| {
-        AppError(
-            StatusCode::BAD_REQUEST,
-            anyhow!("Failed to parse search parameters: {}", e),
-        )
-    })?;
-
-    let matches = perform_search(index, req.queries, params, model).await?;
-
-    Ok(Json(SearchResponse { matches }))
 }

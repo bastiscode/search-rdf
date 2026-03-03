@@ -1,12 +1,14 @@
 use crate::{
     data::embedding::Embedding,
     model::image::huggingface::HuggingFaceImageModel,
+    model::multimodal::open_clip::OpenClipModel,
     model::text::{sentence_transformer::SentenceTransformer, vllm::VLLM},
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 pub mod image;
+pub mod multimodal;
 pub mod text;
 pub(crate) mod utils;
 
@@ -15,6 +17,7 @@ pub enum EmbeddingModel {
     SentenceTransformer(SentenceTransformer),
     Vllm(VLLM),
     HuggingFaceImage(HuggingFaceImageModel),
+    OpenClip(OpenClipModel),
 }
 
 impl EmbeddingModel {
@@ -23,6 +26,7 @@ impl EmbeddingModel {
             EmbeddingModel::SentenceTransformer(m) => m.model_name(),
             EmbeddingModel::Vllm(m) => m.model_name(),
             EmbeddingModel::HuggingFaceImage(m) => m.model_name(),
+            EmbeddingModel::OpenClip(m) => m.model_name(),
         }
     }
 
@@ -31,6 +35,7 @@ impl EmbeddingModel {
             EmbeddingModel::SentenceTransformer(m) => m.model_type(),
             EmbeddingModel::Vllm(m) => m.model_type(),
             EmbeddingModel::HuggingFaceImage(m) => m.model_type(),
+            EmbeddingModel::OpenClip(m) => m.model_type(),
         }
     }
 
@@ -39,6 +44,7 @@ impl EmbeddingModel {
             EmbeddingModel::SentenceTransformer(..) => None,
             EmbeddingModel::Vllm(m) => Some(m.max_model_len()),
             EmbeddingModel::HuggingFaceImage(..) => None,
+            EmbeddingModel::OpenClip(..) => None,
         }
     }
 
@@ -47,6 +53,7 @@ impl EmbeddingModel {
             EmbeddingModel::SentenceTransformer(m) => m.num_dimensions(),
             EmbeddingModel::Vllm(m) => m.num_dimensions(),
             EmbeddingModel::HuggingFaceImage(m) => m.num_dimensions(),
+            EmbeddingModel::OpenClip(m) => m.num_dimensions(),
         }
     }
 }

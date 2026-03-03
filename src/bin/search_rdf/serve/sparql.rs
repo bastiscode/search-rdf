@@ -23,12 +23,21 @@ use spargebra::{Query as SparqlQuery, SparqlParser};
 
 use crate::search_rdf::index::{SearchIndex, SearchParams};
 use crate::search_rdf::serve::search::{
-    MatchInfo, Query, perform_neighbor_search, perform_neighbor_search_with_filter,
+    MatchInfo, Modality, Query, perform_neighbor_search, perform_neighbor_search_with_filter,
     perform_search, perform_search_with_filter,
 };
 
 use super::search::SearchMatch;
 use super::types::{AppError, AppState};
+
+fn parse_modality(s: Option<&str>) -> Result<Option<Modality>, AppError> {
+    match s {
+        None => Ok(None),
+        Some(s) => serde_plain::from_str(s)
+            .map(Some)
+            .map_err(|_| AppError(StatusCode::BAD_REQUEST, anyhow!("Unknown modality: '{s}'"))),
+    }
+}
 
 fn trim_identifier(iri: &str) -> &str {
     iri.trim_start_matches('<').trim_end_matches('>')
@@ -175,6 +184,7 @@ pub async fn service(
     };
 
     let mut query = None;
+    let mut modality_str = None;
     let mut variables = HashMap::new();
     let mut params = HashMap::new();
     params.insert("type".to_string(), index.index_type().to_string());
@@ -216,10 +226,10 @@ pub async fn service(
                 match pred {
                     "query" => match tp.object {
                         TermPattern::Literal(lit) => {
-                            query = Some(Query::Text(lit.value().to_string()));
+                            query = Some(lit.value().to_string());
                         }
                         TermPattern::NamedNode(iri) => {
-                            query = Some(Query::Identifier(iri.as_str().to_string()));
+                            query = Some(iri.as_str().to_string());
                         }
                         _ => {
                             return Err(AppError(
@@ -228,6 +238,16 @@ pub async fn service(
                             ));
                         }
                     },
+                    "modality" => {
+                        if let TermPattern::Literal(lit) = tp.object {
+                            modality_str = Some(lit.value().to_string());
+                        } else {
+                            return Err(AppError(
+                                StatusCode::BAD_REQUEST,
+                                anyhow!("Expected literal for 'modality' predicate"),
+                            ));
+                        }
+                    }
                     name @ ("id" | "field" | "identifier" | "score" | "rank") => {
                         if let TermPattern::Variable(var) = tp.object {
                             variables.insert(name.to_string(), var);
@@ -259,11 +279,24 @@ pub async fn service(
         }
     }
 
-    let Some(query) = query else {
+    let Some(query_value) = query else {
         return Err(AppError(
             StatusCode::BAD_REQUEST,
             anyhow!("Missing required 'query' config parameter"),
         ));
+    };
+
+    let modality = parse_modality(modality_str.as_deref())?;
+    let query = match modality {
+        Some(Modality::Iri) => Query::Identifier { value: query_value },
+        None if NamedNode::new(&query_value).is_ok() => {
+            // No modality specified and value looks like an IRI → identifier/neighbor search
+            Query::Identifier { value: query_value }
+        }
+        _ => Query::Value {
+            value: query_value,
+            modality,
+        },
     };
 
     if !variables.contains_key("identifier") {
@@ -288,7 +321,7 @@ pub async fn service(
 
     // perform search — if the query is a known identifier, do neighbor search instead
     let maybe_neighbor_id = match &query {
-        Query::Identifier(iri) => get_id_from_identifier(&index, iri),
+        Query::Identifier { value } => get_id_from_identifier(&index, value),
         _ => None,
     };
 
@@ -296,11 +329,11 @@ pub async fn service(
         vec![perform_neighbor_search(index, data_id, params, model).await?]
     } else {
         match query {
-            Query::Identifier(iri) => {
+            Query::Identifier { value } => {
                 return Err(AppError(
                     StatusCode::BAD_REQUEST,
-                    anyhow!("IRI '{iri}' is not a known identifier in index '{index_name}'"),
-                ))
+                    anyhow!("IRI '{value}' is not a known identifier in index '{index_name}'"),
+                ));
             }
             query => perform_search(index, vec![query], params, model).await?,
         }
@@ -423,7 +456,9 @@ fn serialize_identifier_mode_matches(
         for search_match in matches {
             let solution =
                 search_match_to_solution(search_match, variables, &[Some(row_term.clone())], rank)?;
-            serializer.serialize(&solution).map_err(|e| anyhow!("{e}"))?;
+            serializer
+                .serialize(&solution)
+                .map_err(|e| anyhow!("{e}"))?;
             rank += 1;
         }
     }
@@ -435,6 +470,7 @@ fn serialize_identifier_mode_matches(
 pub struct QlProxyParams {
     // Search parameters (query is optional; if absent, query body column or text is used)
     query: Option<String>,
+    modality: Option<Modality>,
     #[serde(default = "default_rowvar")]
     rowvar: String,
     #[serde(flatten)]
@@ -610,7 +646,8 @@ pub async fn qlproxy(
             )
         })?;
 
-        let is_iri = NamedNode::new(&query_str).is_ok();
+        let is_iri = matches!(params.modality, Some(Modality::Iri))
+            || (params.modality.is_none() && NamedNode::new(&query_str).is_ok());
         let maybe_neighbor_id = if is_iri {
             get_id_from_identifier(&index, &query_str)
         } else {
@@ -618,6 +655,11 @@ pub async fn qlproxy(
         };
 
         let id_to_row = Arc::new(id_to_row);
+
+        let query = Query::Value {
+            value: query_str.clone(),
+            modality: params.modality,
+        };
 
         let matches = if let Some(data_id) = maybe_neighbor_id {
             vec![if has_filter_column {
@@ -640,16 +682,12 @@ pub async fn qlproxy(
             ));
         } else if has_filter_column {
             let id_to_row_filter = id_to_row.clone();
-            perform_search_with_filter(
-                index,
-                vec![Query::Text(query_str)],
-                search_params,
-                model,
-                move |id| id_to_row_filter.contains_key(&id),
-            )
+            perform_search_with_filter(index, vec![query], search_params, model, move |id| {
+                id_to_row_filter.contains_key(&id)
+            })
             .await?
         } else {
-            perform_search(index, vec![Query::Text(query_str)], search_params, model).await?
+            perform_search(index, vec![query], search_params, model).await?
         };
 
         let row_fn = move |id: u32| id_to_row.get(&id).cloned();

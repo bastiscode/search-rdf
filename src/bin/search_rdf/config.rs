@@ -82,6 +82,13 @@ pub enum ModelType {
         #[serde(default = "default_model_batch_size")]
         batch_size: usize,
     },
+    OpenClip {
+        model: String,
+        #[serde(default = "default_device")]
+        device: String,
+        #[serde(default = "default_model_batch_size")]
+        batch_size: usize,
+    },
 }
 
 fn default_device() -> String {
@@ -211,6 +218,55 @@ server:
         let server = config.server.as_ref().unwrap();
         assert_eq!(server.host, "0.0.0.0");
         assert_eq!(server.port, 8080);
+    }
+
+    #[test]
+    fn test_parse_open_clip_model() {
+        let yaml = r#"
+models:
+  - name: clip
+    type: open-clip
+    model: "hf-hub:laion/CLIP-ViT-B-32-laion2B-s34B-b79K"
+    device: cuda
+    batch_size: 32
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse config");
+        let models = config.models.unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "clip");
+        match &models[0].model_type {
+            ModelType::OpenClip {
+                model,
+                device,
+                batch_size,
+            } => {
+                assert_eq!(model, "hf-hub:laion/CLIP-ViT-B-32-laion2B-s34B-b79K");
+                assert_eq!(device, "cuda");
+                assert_eq!(*batch_size, 32);
+            }
+            _ => panic!("Expected OpenClip model type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_open_clip_defaults() {
+        let yaml = r#"
+models:
+  - name: clip
+    type: open-clip
+    model: "hf-hub:laion/CLIP-ViT-B-32-laion2B-s34B-b79K"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse config");
+        let models = config.models.unwrap();
+        match &models[0].model_type {
+            ModelType::OpenClip {
+                device, batch_size, ..
+            } => {
+                assert_eq!(device, "cpu");
+                assert_eq!(*batch_size, 16);
+            }
+            _ => panic!("Expected OpenClip model type"),
+        }
     }
 
     #[test]

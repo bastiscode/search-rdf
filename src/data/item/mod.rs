@@ -536,6 +536,14 @@ pub fn load_image_ndarray_from_url(url: &str) -> Result<Array3<u8>> {
     load_image_ndarray_from_bytes(&bytes)
 }
 
+pub fn load_image_ndarray_from_base64(s: &str) -> Result<Array3<u8>> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(s)
+        .map_err(|e| anyhow!("Failed to decode base64 image data: {e}"))?;
+    load_image_ndarray_from_bytes(&bytes)
+}
+
 fn encode_string(bytes: &mut Vec<u8>, s: &str) {
     let s_bytes = s.as_bytes();
     bytes.extend_from_slice(&(s_bytes.len() as u64).to_le_bytes());

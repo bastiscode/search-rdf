@@ -9,7 +9,10 @@ pub(crate) fn ignore_system_signals(py: Python) -> Result<()> {
         c_str!(
             r#"
 import signal
-signal.signal(signal.SIGINT, signal.SIG_DFL)
+try:
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+except ValueError:
+    pass  # not on main thread, signal handling not available
         "#
         ),
         None,

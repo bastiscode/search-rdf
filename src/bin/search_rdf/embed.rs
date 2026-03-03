@@ -7,6 +7,7 @@ use safetensors::serialize_to_file;
 use safetensors::tensor::{Dtype, TensorView};
 use search_rdf::data::item::{FieldRef, load_image_ndarray_from_bytes};
 use search_rdf::model::Embed;
+use search_rdf::model::multimodal::MultiModalInput;
 use std::collections::HashMap;
 use std::fs::{File, create_dir_all, remove_file};
 use std::io::{BufWriter, Write};
@@ -105,6 +106,27 @@ fn get_image_fields(fields: &[FieldRef]) -> Result<Vec<Array3<u8>>> {
         .collect()
 }
 
+fn get_multimodal_fields(fields: &[FieldRef]) -> Result<Vec<MultiModalInput>> {
+    fields
+        .iter()
+        .map(|f| {
+            if f.is_text() {
+                Ok(MultiModalInput::Text(f.as_str().to_string()))
+            } else if f.is_image() {
+                let bytes = f.load_data().context("Failed to load image data")?;
+                let arr = load_image_ndarray_from_bytes(&bytes)
+                    .context("Failed to convert image bytes to array")?;
+                Ok(MultiModalInput::Image(arr))
+            } else {
+                Err(anyhow!(
+                    "Unsupported field type for OpenCLIP model: {:?}",
+                    f
+                ))
+            }
+        })
+        .collect()
+}
+
 fn build_embeddings(
     base_dir: &Path,
     dataset: &Path,
@@ -184,6 +206,10 @@ fn build_embeddings(
             EmbeddingModel::HuggingFaceImage(m) => {
                 let images = get_image_fields(&chunk)?;
                 m.embed(&images, params)?
+            }
+            EmbeddingModel::OpenClip(m) => {
+                let inputs = get_multimodal_fields(&chunk)?;
+                m.embed(&inputs, params)?
             }
         };
 

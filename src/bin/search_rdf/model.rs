@@ -7,6 +7,7 @@ use search_rdf::model::EmbeddingParams;
 use search_rdf::model::{
     EmbeddingModel,
     image::huggingface::HuggingFaceImageModel,
+    multimodal::open_clip::OpenClipModel,
     text::{sentence_transformer::SentenceTransformer, vllm::VLLM},
 };
 
@@ -38,6 +39,15 @@ pub fn load_model(model_type: &ModelType) -> Result<EmbeddingModel> {
         } => {
             let img_model = HuggingFaceImageModel::load(model_name, device, *batch_size)?;
             Ok(EmbeddingModel::HuggingFaceImage(img_model))
+        }
+
+        ModelType::OpenClip {
+            model,
+            device,
+            batch_size,
+        } => {
+            let clip_model = OpenClipModel::load(model, device, *batch_size)?;
+            Ok(EmbeddingModel::OpenClip(clip_model))
         }
     }
 }
