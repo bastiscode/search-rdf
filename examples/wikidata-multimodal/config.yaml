@@ -13,9 +13,9 @@ datasets:
         PREFIX wdt: <http://www.wikidata.org/prop/direct/>
         SELECT DISTINCT ?id ?value WHERE {
           {
-            ?id wdt:P31/wdt:P279* wd:Q729 .
+            ?id wdt:P279* wd:Q729 .
           } UNION {
-            ?id wdt:P31/wdt:P279* wd:Q756 .
+            ?id wdt:P279* wd:Q756 .
           }
           {
             ?id @en@rdfs:label | @en@skos:altLabel | @en@schema:description ?value .
