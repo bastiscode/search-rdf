@@ -1,6 +1,6 @@
 # Wikidata Movie Descriptions
 
-Build a full-text and embedding search index for English Wikipedia 
+Build a full-text and embedding search index for English Wikipedia
 abstracts of movies in Wikidata.
 
 ## Usage
@@ -31,12 +31,12 @@ search-rdf serve config.yaml
 # Simple full text search
 curl -X POST http://localhost:8080/search/wikidata-movies-full-text \
   -H "Content-Type: application/json" \
-  -d '{"query": ["chastain nolan space"], "k": 10}'
+  -d '{"queries": [{"type": "value", "value": "chastain nolan space"}], "k": 10}'
 
 # Simple embedding search
 curl -X POST http://localhost:8080/search/wikidata-movies-embedding \
   -H "Content-Type: application/json" \
-  -d '{"query": ["space movie by nolan"], "k": 10}'
+  -d '{"queries": [{"type": "value", "value": "space movie by nolan"}], "k": 10}'
 ```
 
 ## Notes
@@ -44,4 +44,4 @@ curl -X POST http://localhost:8080/search/wikidata-movies-embedding \
 - Query fetches instances of and subclasses of movies (Q11424) with
 their English Wikipedia abstracts
 - Limited to 10,000 results (adjust `LIMIT` in config.yaml for more)
-- Puts data in `data/` and indices in `indices/`
+- Puts data in `data/` and indices in `index/`

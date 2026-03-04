@@ -1,9 +1,9 @@
 datasets:
-  - type: text
-    name: wikidata-humans
+  - name: wikidata-humans
     output: data/
     source:
       type: sparql-query
+      default_field_type: text
       endpoint: https://qlever.dev/api/wikidata-sebastian
       query: |
         PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -32,20 +32,19 @@ embeddings:
   - name: wikidata-humans-embeddings
     model: text-embedding
     output: data/embeddings.safetensors
-    type: text
-    dataset: data/
+    data: data/
     batch_size: 128
 
 indices:
   - name: wikidata-humans-embedding-fp32
-    type: text-embedding
-    text_data: data/
+    type: embedding-with-data
+    data: data/
     embedding_data: data/embeddings.safetensors
     model: text-embedding
     output: index/fp32/
   - name: wikidata-humans-embedding-binary
-    type: text-embedding
-    text_data: data/
+    type: embedding-with-data
+    data: data/
     embedding_data: data/embeddings.safetensors
     model: text-embedding
     output: index/binary/

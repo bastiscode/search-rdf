@@ -130,6 +130,13 @@ models:
     model_name: openai/clip-vit-base-patch32
     device: cuda
     batch_size: 16
+
+  # OpenCLIP multimodal models (text + image in shared space)
+  - name: my-clip-model
+    type: open-clip
+    model: hf-hub:timm/ViT-B-16-SigLIP2
+    device: cuda
+    batch_size: 32
 ```
 
 Optional embedding parameters can be added to any model:
@@ -253,22 +260,37 @@ POST /search/{index_name}
 Content-Type: application/json
 ```
 
-The request body contains a `queries` array and search parameters. Query format depends on the index type:
+The request body contains a `queries` array and search parameters.
 
-**Text queries** (for keyword, full-text, and text embedding indices):
+**Value queries** (text, image URL, or base64 image):
 
 ```json
 {
-  "queries": [{"type": "text", "value": "search query"}],
+  "queries": [{"type": "value", "value": "search query"}],
   "k": 10
 }
 ```
 
-**Image URL queries** (for image embedding indices):
+An optional `modality` field controls how the value is interpreted:
+- `"text"` — embed as text (default for text-only models)
+- `"image"` — load as image from URL and embed with vision encoder
+- `"image-base64"` — decode base64 image data and embed with vision encoder
+- `"iri"` — treat as an identifier for neighbor search
+
+When `modality` is omitted, it is inferred from the model and value content:
+- Text-only models (vLLM, sentence-transformer): always text
+- Image-only models (huggingface-image): image URL or base64
+- Multimodal models (open-clip): image if value looks like a URL, otherwise text
+
+```json
+{"queries": [{"type": "value", "value": "https://example.com/image.jpg", "modality": "image"}], "k": 10}
+```
+
+**Identifier queries** (neighbor search by known IRI):
 
 ```json
 {
-  "queries": [{"type": "url", "value": "https://example.com/image.jpg"}],
+  "queries": [{"type": "identifier", "value": "http://www.wikidata.org/entity/Q42"}],
   "k": 10
 }
 ```
@@ -277,7 +299,7 @@ The request body contains a `queries` array and search parameters. Query format 
 
 ```json
 {
-  "queries": [{"type": "embedding", "value": [0.1, 0.2, 0.3, ...]}],
+  "queries": [{"type": "embedding", "value": [0.1, 0.2, 0.3]}],
   "k": 10
 }
 ```
@@ -313,8 +335,8 @@ Response format:
 When `sparql` is configured in the server section:
 
 ```
-POST /service/{index_name}
-POST /qlproxy/{index_name}
+POST /sparql/{index_name}
+POST /sparql/qlproxy/{index_name}
 ```
 
 These endpoints enable integration with SPARQL engines that support federated queries.
@@ -400,10 +422,10 @@ Test with curl:
 # Keyword search
 curl -X POST http://localhost:8080/search/keyword \
   -H "Content-Type: application/json" \
-  -d '{"queries": [{"type": "text", "value": "Albert Einstein"}], "k": 5}'
+  -d '{"queries": [{"type": "value", "value": "Albert Einstein"}], "k": 5}'
 
 # Semantic search
 curl -X POST http://localhost:8080/search/semantic \
   -H "Content-Type: application/json" \
-  -d '{"queries": [{"type": "text", "value": "famous physicist"}], "k": 5}'
+  -d '{"queries": [{"type": "value", "value": "famous physicist"}], "k": 5}'
 ```

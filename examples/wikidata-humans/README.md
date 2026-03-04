@@ -31,21 +31,21 @@ search-rdf serve config.yaml
 # Simple keyword search
 curl -X POST http://localhost:8080/search/wikidata-humans-keyword \
   -H "Content-Type: application/json" \
-  -d '{"query": ["Einstein"], "k": 10}'
+  -d '{"queries": [{"type": "value", "value": "Einstein"}], "k": 10}'
 
 # Batched keyword search
 curl -X POST http://localhost:8080/search/wikidata-humans-keyword \
   -H "Content-Type: application/json" \
-  -d '{"query": ["Einstein", "Peter Parker"], "k": 10}'
+  -d '{"queries": [{"type": "value", "value": "Einstein"}, {"type": "value", "value": "Peter Parker"}], "k": 10}'
 
 # Embedding search
 curl -X POST http://localhost:8080/search/wikidata-humans-embedding \
   -H "Content-Type: application/json" \
-  -d '{"query": ["Einstein"], "k": 10}'
+  -d '{"queries": [{"type": "value", "value": "Einstein"}], "k": 10}'
 ```
 
 ## Notes
 
 - Query fetches instances of human (Q5) with English labels and aliases
 - Limited to 100,000 results (adjust `LIMIT` in config.yaml for more)
-- Puts data in `data/` and indices in `indices/`
+- Puts data in `data/` and indices in `index/`

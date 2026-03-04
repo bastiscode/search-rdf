@@ -87,11 +87,11 @@ pub async fn run(config_path: &Path) -> Result<()> {
         // increase body limit if SPARQL service is enabled, because we
         // might receive large results in the qlproxy endpoint
         app = app
-            .route("/service/{index}", post(service))
-            .route("/qlproxy/{index}", post(qlproxy));
+            .route("/sparql/{index}", post(service))
+            .route("/sparql/qlproxy/{index}", post(qlproxy));
 
-        info!("POST /service/{{index}}");
-        info!("POST /qlproxy/{{index}}");
+        info!("POST /sparql/{{index}}");
+        info!("POST /sparql/qlproxy/{{index}}");
     };
 
     // Add CORS if enabled

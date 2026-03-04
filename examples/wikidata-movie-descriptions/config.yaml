@@ -1,9 +1,9 @@
 datasets:
-  - type: text
-    name: wikidata-movie-descriptions
+  - name: wikidata-movie-descriptions
     output: data/
     source:
       type: sparql-query
+      default_field_type: text
       endpoint: https://qlever.dev/api/wikidata-sebastian
       query: |
         PREFIX wikibase: <http://wikiba.se/ontology#>
@@ -30,18 +30,17 @@ embeddings:
   - name: wikidata-movies-embeddings
     model: text-embedding
     output: data/embeddings.safetensors
-    type: text
-    dataset: data/
+    data: data/
     batch_size: 128
 
 indices:
   - name: wikidata-movies-full-text
     type: full-text
-    text_data: data/
+    data: data/
     output: index/full-text/
   - name: wikidata-movies-embedding
-    type: text-embedding
-    text_data: data/
+    type: embedding-with-data
+    data: data/
     embedding_data: data/embeddings.safetensors
     output: index/embedding/
     model: text-embedding
