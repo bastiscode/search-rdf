@@ -121,7 +121,6 @@ class KeywordIndex:
         """
         ...
 
-
     def data(self) -> Data:
         """
         Get the data associated with the index.
@@ -192,7 +191,6 @@ class FuzzyIndex:
             List of (document_id, field_index, score) tuples
         """
         ...
-
 
     def data(self) -> Data:
         """
