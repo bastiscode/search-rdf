@@ -1,5 +1,5 @@
 use crate::{
-    data::embedding::Embedding,
+    data::embedding::{Embedding, EmbeddingModality},
     model::image::huggingface::HuggingFaceImageModel,
     model::multimodal::open_clip::OpenClipModel,
     model::text::{sentence_transformer::SentenceTransformer, vllm::VLLM},
@@ -30,12 +30,24 @@ impl EmbeddingModel {
         }
     }
 
-    pub fn model_type(&self) -> &str {
+    pub fn provider(&self) -> &str {
         match self {
-            EmbeddingModel::SentenceTransformer(m) => m.model_type(),
-            EmbeddingModel::Vllm(m) => m.model_type(),
-            EmbeddingModel::HuggingFaceImage(m) => m.model_type(),
-            EmbeddingModel::OpenClip(m) => m.model_type(),
+            EmbeddingModel::SentenceTransformer(m) => m.provider(),
+            EmbeddingModel::Vllm(m) => m.provider(),
+            EmbeddingModel::HuggingFaceImage(m) => m.provider(),
+            EmbeddingModel::OpenClip(m) => m.provider(),
+        }
+    }
+
+    pub fn modality(&self) -> Vec<EmbeddingModality> {
+        match self {
+            EmbeddingModel::SentenceTransformer(_) | EmbeddingModel::Vllm(_) => {
+                vec![EmbeddingModality::Text]
+            }
+            EmbeddingModel::HuggingFaceImage(_) => vec![EmbeddingModality::Image],
+            EmbeddingModel::OpenClip(_) => {
+                vec![EmbeddingModality::Text, EmbeddingModality::Image]
+            }
         }
     }
 
@@ -80,7 +92,7 @@ pub trait Embed {
 
     fn model_name(&self) -> &str;
 
-    fn model_type(&self) -> &str;
+    fn provider(&self) -> &str;
 }
 
 pub fn normalize_embedding(mut embedding: Embedding) -> Embedding {

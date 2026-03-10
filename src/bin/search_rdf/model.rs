@@ -69,7 +69,7 @@ pub fn load_model_and_params(
     info!(
         "[OK] {} (type: {}, dimensions: {}, max_input_len: {})",
         model_config.name,
-        model.model_type(),
+        model.provider(),
         model.num_dimensions(),
         model
             .max_input_len()

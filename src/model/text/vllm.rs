@@ -172,7 +172,7 @@ impl Embed for VLLM {
         &self.inner.model_name
     }
 
-    fn model_type(&self) -> &str {
+    fn provider(&self) -> &str {
         "vllm"
     }
 }
@@ -190,7 +190,7 @@ mod tests {
         let model = VLLM::new(TEST_ENDPOINT, TEST_MODEL).expect("Failed to load model");
 
         assert_eq!(model.model_name(), TEST_MODEL);
-        assert_eq!(model.model_type(), "vllm");
+        assert_eq!(model.provider(), "vllm");
         assert!(
             model.num_dimensions() > 0,
             "Model should have positive dimensions"
@@ -343,7 +343,7 @@ mod tests {
         let model = VLLM::new(TEST_ENDPOINT, TEST_MODEL).expect("Failed to load model");
 
         assert_eq!(model.model_name(), TEST_MODEL);
-        assert_eq!(model.model_type(), "vllm");
+        assert_eq!(model.provider(), "vllm");
     }
 
     #[test]

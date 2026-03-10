@@ -43,6 +43,13 @@ impl Precision {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EmbeddingModality {
+    Text,
+    Image,
+}
+
 // Only support Float32 for now, to always have the possibility of
 // reranking
 pub type Embedding = Vec<f32>;
@@ -58,7 +65,9 @@ pub struct Tensors {
     safetensors: SafeTensors<'static>,
     embedding: TensorView<'static>,
     id: Option<TensorView<'static>>,
-    pub model: String,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub modality: Vec<EmbeddingModality>,
 }
 
 impl Tensors {
@@ -89,15 +98,21 @@ impl Tensors {
             ));
         }
 
-        let (_, metadata) = SafeTensors::read_metadata(&mmap)?;
-        let Some(metadata) = metadata.metadata() else {
-            return Err(anyhow!("Embedding safetensors missing metadata"));
-        };
+        let (_, raw_metadata) = SafeTensors::read_metadata(&mmap)?;
+        let metadata = raw_metadata.metadata();
 
-        let model = metadata
-            .get("model")
-            .cloned()
-            .ok_or_else(|| anyhow!("Embedding safetensors missing required 'model' metadata"))?;
+        let model = metadata.as_ref().and_then(|m| m.get("model").cloned());
+        let provider = metadata.as_ref().and_then(|m| m.get("provider").cloned());
+        let modality = metadata
+            .as_ref()
+            .and_then(|m| m.get("modality").cloned())
+            .map(|s| {
+                s.split(',')
+                    .map(|m| serde_plain::from_str(m.trim()))
+                    .collect::<std::result::Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
 
         let id = safetensors.tensor("id").ok();
         if let Some(id) = id.as_ref() {
@@ -121,6 +136,8 @@ impl Tensors {
             embedding,
             id,
             model,
+            provider,
+            modality,
         })
     }
 
@@ -225,8 +242,18 @@ impl Embeddings {
     }
 
     /// Get the model name from metadata
-    pub fn model(&self) -> &str {
-        &self.inner.tensors.model
+    pub fn model(&self) -> Option<&str> {
+        self.inner.tensors.model.as_deref()
+    }
+
+    /// Get the provider from metadata
+    pub fn provider(&self) -> Option<&str> {
+        self.inner.tensors.provider.as_deref()
+    }
+
+    /// Get the modalities from metadata
+    pub fn modality(&self) -> &[EmbeddingModality] {
+        &self.inner.tensors.modality
     }
 }
 
@@ -309,8 +336,18 @@ impl EmbeddingsWithData {
     }
 
     /// Get the model name from metadata
-    pub fn model(&self) -> &str {
-        &self.inner.tensors.model
+    pub fn model(&self) -> Option<&str> {
+        self.inner.tensors.model.as_deref()
+    }
+
+    /// Get the provider from metadata
+    pub fn provider(&self) -> Option<&str> {
+        self.inner.tensors.provider.as_deref()
+    }
+
+    /// Get the modalities from metadata
+    pub fn modality(&self) -> &[EmbeddingModality] {
+        &self.inner.tensors.modality
     }
 
     pub fn embedding_items(&self) -> impl Iterator<Item = (u32, Vec<EmbeddingRef<'_>>)> + '_ {
@@ -416,10 +453,11 @@ mod tests {
         let tensors = vec![("embedding", embedding_tensor), ("id", id_tensor)];
         let bytes = serialize(
             tensors,
-            Some(HashMap::from([(
-                String::from("model"),
-                String::from("test-model"),
-            )])),
+            Some(HashMap::from([
+                (String::from("model"), String::from("test-model")),
+                (String::from("provider"), String::from("test-provider")),
+                (String::from("modality"), String::from("text")),
+            ])),
         )?;
 
         // Write to file
@@ -455,7 +493,9 @@ mod tests {
         assert_eq!(data.len(), 3);
         assert_eq!(data.num_dimensions(), 4);
         // Precision is now handled at index level, data is always Float32
-        assert_eq!(data.model(), "test-model");
+        assert_eq!(data.model(), Some("test-model"));
+        assert_eq!(data.provider(), Some("test-provider"));
+        assert_eq!(data.modality(), &[EmbeddingModality::Text]);
 
         // Test DataSource trait - field(id, field_idx) returns embeddings for that ID
         assert_eq!(data.num_fields(100), Some(1));
@@ -491,7 +531,7 @@ mod tests {
     }
 
     #[test]
-    fn test_embeddings_validation_missing_metadata() {
+    fn test_embeddings_optional_metadata() {
         let temp_dir = tempdir().expect("Failed to create temp dir");
         let data_dir = temp_dir.path().join("data");
         std::fs::create_dir_all(&data_dir).expect("Failed to create data dir");
@@ -514,27 +554,26 @@ mod tests {
         let embedding_tensor = TensorView::new(Dtype::F32, vec![1, 2], &embedding_bytes).unwrap();
         let id_tensor = TensorView::new(Dtype::U32, vec![1], &id_bytes).unwrap();
 
-        // missing metadata
+        // No metadata at all
         let tensors = vec![("embedding", embedding_tensor), ("id", id_tensor)];
-        let bytes = serialize(tensors.clone(), None).unwrap(); // No metadata!
+        let bytes = serialize(tensors.clone(), None).unwrap();
         std::fs::write(&embedding_path, bytes).unwrap();
 
-        let result = Embeddings::build(&data_dir);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("missing metadata"));
+        Embeddings::build(&data_dir).expect("Should succeed without metadata");
+        let data = Embeddings::load(&data_dir).expect("Should load without metadata");
+        assert_eq!(data.model(), None);
+        assert_eq!(data.provider(), None);
+        assert!(data.modality().is_empty());
 
-        // missing 'model' key
-        let bytes = serialize(tensors, Some(HashMap::new())).unwrap(); // No metadata!
+        // Empty metadata
+        let bytes = serialize(tensors, Some(HashMap::new())).unwrap();
         std::fs::write(&embedding_path, bytes).unwrap();
 
-        let result = Embeddings::build(&data_dir);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("missing required 'model' metadata")
-        );
+        Embeddings::build(&data_dir).expect("Should succeed with empty metadata");
+        let data = Embeddings::load(&data_dir).expect("Should load with empty metadata");
+        assert_eq!(data.model(), None);
+        assert_eq!(data.provider(), None);
+        assert!(data.modality().is_empty());
     }
 
     #[test]

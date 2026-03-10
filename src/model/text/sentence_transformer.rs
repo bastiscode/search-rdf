@@ -87,7 +87,7 @@ impl Embed for SentenceTransformer {
         &self.inner.name
     }
 
-    fn model_type(&self) -> &str {
+    fn provider(&self) -> &str {
         "sentence-transformer"
     }
 }

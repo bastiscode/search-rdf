@@ -311,12 +311,33 @@ class EmbeddingIndex:
         ...
 
     @property
-    def model(self) -> str:
+    def model(self) -> str | None:
         """
         Get the model used for embeddings.
 
         Returns:
-            Model name as a string
+            Model name as a string, or None if not available
+        """
+        ...
+
+    @property
+    def provider(self) -> str | None:
+        """
+        Get the provider used to generate embeddings.
+
+        Returns:
+            Provider name (e.g., "vllm", "sentence-transformer", "huggingface-image", "open-clip"),
+            or None if not available
+        """
+        ...
+
+    @property
+    def modality(self) -> list[str]:
+        """
+        Get the modalities supported by the embeddings.
+
+        Returns:
+            List of modality strings (e.g., ["text"], ["image"], ["text", "image"])
         """
         ...
 

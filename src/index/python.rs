@@ -150,8 +150,24 @@ impl EmbeddingIndex {
     }
 
     #[getter]
-    pub fn model(&self) -> &str {
+    pub fn model(&self) -> Option<&str> {
         self.inner.data().model()
+    }
+
+    #[getter]
+    pub fn provider(&self) -> Option<&str> {
+        self.inner.data().provider()
+    }
+
+    #[getter]
+    pub fn modality(&self) -> Result<Vec<String>> {
+        self.inner
+            .data()
+            .modality()
+            .iter()
+            .map(serde_plain::to_string)
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|e| anyhow!(e))
     }
 }
 

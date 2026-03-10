@@ -235,12 +235,19 @@ fn build_embeddings(
     )?;
 
     // Serialize with model metadata
+    let modality = model
+        .modality()
+        .iter()
+        .map(serde_plain::to_string)
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .join(",");
     serialize_to_file(
         [("embedding", embedding_tensor)],
-        Some(HashMap::from([(
-            String::from("model"),
-            model.model_name().to_string(),
-        )])),
+        Some(HashMap::from([
+            (String::from("model"), model.model_name().to_string()),
+            (String::from("provider"), model.provider().to_string()),
+            (String::from("modality"), modality),
+        ])),
         &base_dir.join(output),
     )?;
 

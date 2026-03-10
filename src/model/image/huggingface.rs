@@ -93,7 +93,7 @@ impl Embed for HuggingFaceImageModel {
         &self.inner.name
     }
 
-    fn model_type(&self) -> &str {
+    fn provider(&self) -> &str {
         "huggingface-image"
     }
 }

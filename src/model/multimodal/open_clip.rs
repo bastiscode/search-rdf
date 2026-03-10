@@ -136,7 +136,7 @@ impl Embed for OpenClipModel {
         &self.inner.name
     }
 
-    fn model_type(&self) -> &str {
+    fn provider(&self) -> &str {
         "open-clip"
     }
 }

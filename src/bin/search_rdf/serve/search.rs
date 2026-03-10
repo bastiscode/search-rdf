@@ -246,7 +246,7 @@ pub fn embed_query(
                     "Cannot embed {:?} query with model {} of type {}",
                     modality,
                     model.model_name(),
-                    model.model_type()
+                    model.provider()
                 )),
             }
         }

@@ -826,10 +826,10 @@ mod embedding_index_tests {
         let tensors = vec![("embedding", embedding_tensor), ("id", id_tensor)];
         let bytes = serialize(
             tensors,
-            Some(HashMap::from([(
-                String::from("model"),
-                String::from("test-model"),
-            )])),
+            Some(HashMap::from([
+                (String::from("model"), String::from("test-model")),
+                (String::from("provider"), String::from("test-provider")),
+            ])),
         )?;
 
         // Write to file
@@ -1516,10 +1516,10 @@ mod embedding_index_tests {
         )?;
         let bytes = serialize(
             vec![("embedding", embedding_tensor)],
-            Some(HashMap::from([(
-                String::from("model"),
-                String::from("test-model"),
-            )])),
+            Some(HashMap::from([
+                (String::from("model"), String::from("test-model")),
+                (String::from("provider"), String::from("test-provider")),
+            ])),
         )?;
         std::fs::write(path, bytes)?;
         Ok(())

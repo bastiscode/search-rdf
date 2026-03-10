@@ -1,6 +1,6 @@
 [package]
 name = "search-rdf"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 publish = false
 
@@ -25,10 +25,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 bincode = { version = "2.0", features = ["serde"] }
-pyo3 = { version = "0.28", features = [
-  "anyhow",
-  "abi3-py312",
-] }
+pyo3 = { version = "0.28", features = ["anyhow", "abi3-py312"] }
 pythonize = "0.28"
 numpy = "0.28"
 byte-trie = { path = "./byte-trie" }
