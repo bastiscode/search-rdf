@@ -560,10 +560,13 @@ mod tests {
         std::fs::write(&embedding_path, bytes).unwrap();
 
         Embeddings::build(&data_dir).expect("Should succeed without metadata");
-        let data = Embeddings::load(&data_dir).expect("Should load without metadata");
-        assert_eq!(data.model(), None);
-        assert_eq!(data.provider(), None);
-        assert!(data.modality().is_empty());
+        {
+            let data = Embeddings::load(&data_dir).expect("Should load without metadata");
+            assert_eq!(data.model(), None);
+            assert_eq!(data.provider(), None);
+            assert!(data.modality().is_empty());
+        }
+        // Drop mmap before overwriting file (required on Windows)
 
         // Empty metadata
         let bytes = serialize(tensors, Some(HashMap::new())).unwrap();
