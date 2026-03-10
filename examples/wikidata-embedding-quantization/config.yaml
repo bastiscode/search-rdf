@@ -37,12 +37,14 @@ embeddings:
 
 indices:
   - name: wikidata-humans-embedding-fp32
+    description: Semantic search with full-precision (fp32) embeddings
     type: embedding-with-data
     data: data/
     embedding_data: data/embeddings.safetensors
     model: text-embedding
     output: index/fp32/
   - name: wikidata-humans-embedding-binary
+    description: Semantic search with binary-quantized embeddings
     type: embedding-with-data
     data: data/
     embedding_data: data/embeddings.safetensors

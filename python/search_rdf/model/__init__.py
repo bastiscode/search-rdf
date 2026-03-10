@@ -1,5 +1,5 @@
 """Embedding models."""
 
-from .embedding import ImageEmbeddingModel, OpenClipModel, TextEmbeddingModel
+from .embedding import HuggingFaceImageModel, OpenClipModel, SentenceTransformerModel
 
-__all__ = ["TextEmbeddingModel", "ImageEmbeddingModel", "OpenClipModel"]
+__all__ = ["SentenceTransformerModel", "HuggingFaceImageModel", "OpenClipModel"]

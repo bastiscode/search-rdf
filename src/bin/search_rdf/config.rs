@@ -116,6 +116,8 @@ fn default_emb_batch_size() -> usize {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct IndexConfig {
     pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
     pub output: PathBuf,
     #[serde(flatten)]
     pub index_type: IndexType,
@@ -307,6 +309,7 @@ indices:
     type: keyword
     data: data/text/wikidata
     output: indices/wikidata/keyword
+    description: Keyword search over Wikidata labels
 
   - name: wikidata_semantic
     type: embedding-with-data
@@ -353,7 +356,13 @@ server:
 
         assert_eq!(config.models.as_ref().unwrap().len(), 1);
         assert_eq!(config.embeddings.as_ref().unwrap().len(), 1);
-        assert_eq!(config.indices.as_ref().unwrap().len(), 2);
+        let indices = config.indices.as_ref().unwrap();
+        assert_eq!(indices.len(), 2);
+        assert_eq!(
+            indices[0].description.as_deref(),
+            Some("Keyword search over Wikidata labels")
+        );
+        assert_eq!(indices[1].description, None);
         let server = config.server.as_ref().unwrap();
         assert_eq!(server.indices.len(), 1);
     }

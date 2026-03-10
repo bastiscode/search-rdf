@@ -10,7 +10,7 @@ from tqdm import trange
 from transformers import AutoImageProcessor, AutoModel
 
 
-class TextEmbeddingModel:
+class SentenceTransformerModel:
     """Text embedding model using sentence-transformers.
 
     Args:
@@ -88,7 +88,7 @@ class TextEmbeddingModel:
         return embeddings[inv_indices]
 
 
-class ImageEmbeddingModel:
+class HuggingFaceImageModel:
     """Image embedding model using HuggingFace transformers.
 
     Args:

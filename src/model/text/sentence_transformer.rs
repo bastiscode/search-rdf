@@ -30,7 +30,7 @@ impl SentenceTransformer {
         device: &str,
     ) -> Result<Bound<'py, PyAny>> {
         let module = py.import("search_rdf.model")?;
-        let model_class = module.getattr("TextEmbeddingModel")?;
+        let model_class = module.getattr("SentenceTransformerModel")?;
         let model_instance = model_class.call1((name, device))?;
         Ok(model_instance)
     }

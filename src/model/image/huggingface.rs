@@ -31,7 +31,7 @@ impl HuggingFaceImageModel {
         device: &str,
     ) -> Result<Bound<'py, PyAny>> {
         let module = py.import("search_rdf.model")?;
-        let model_class = module.getattr("ImageEmbeddingModel")?;
+        let model_class = module.getattr("HuggingFaceImageModel")?;
         let model_instance = model_class.call1((name, device))?;
         Ok(model_instance)
     }

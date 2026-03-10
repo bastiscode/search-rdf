@@ -13,6 +13,7 @@ pub struct Inner {
     pub indices: HashMap<String, SearchIndex>,
     pub models: HashMap<String, (EmbeddingModel, EmbeddingParams)>,
     pub index_to_model: HashMap<String, String>,
+    pub descriptions: HashMap<String, String>,
     pub sparql: Option<SparqlConfig>,
 }
 
@@ -26,6 +27,7 @@ impl AppState {
         indices: HashMap<String, SearchIndex>,
         models: HashMap<String, (EmbeddingModel, EmbeddingParams)>,
         index_to_model: HashMap<String, String>,
+        descriptions: HashMap<String, String>,
         sparql: Option<SparqlConfig>,
     ) -> Self {
         Self {
@@ -33,6 +35,7 @@ impl AppState {
                 indices,
                 models,
                 index_to_model,
+                descriptions,
                 sparql,
             }),
         }

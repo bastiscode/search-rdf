@@ -37,10 +37,12 @@ embeddings:
 
 indices:
   - name: wikidata-humans-keyword
+    description: Keyword search over Wikidata human labels
     type: keyword
     data: data/
     output: index/keyword/
   - name: wikidata-humans-embedding
+    description: Semantic search over Wikidata human labels
     type: embedding-with-data
     data: data/
     embedding_data: data/embeddings.safetensors

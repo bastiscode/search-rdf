@@ -39,6 +39,7 @@ embeddings:
 
 indices:
   - name: nature
+    description: Multimodal search over Wikidata nature entities using CLIP
     type: embedding-with-data
     data: data/
     embedding_data: data/embeddings.safetensors

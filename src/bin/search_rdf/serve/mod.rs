@@ -39,6 +39,7 @@ pub async fn run(config_path: &Path) -> Result<()> {
     let mut search_indices = HashMap::new();
     let mut models = HashMap::new();
     let mut index_to_model: HashMap<String, String> = HashMap::new();
+    let mut descriptions: HashMap<String, String> = HashMap::new();
 
     for name in &server.indices {
         info!("Loading index {}...", name);
@@ -59,6 +60,10 @@ pub async fn run(config_path: &Path) -> Result<()> {
             index_to_model.insert(name.to_string(), model.to_string());
             let (emb_model, emb_params) = load_model_and_params(model, &config)?;
             models.insert(model.to_string(), (emb_model, emb_params));
+        }
+
+        if let Some(desc) = &index_config.description {
+            descriptions.insert(name.to_string(), desc.clone());
         }
 
         let search_index = load_index(config_dir, &index_config.index_type, &index_config.output)?;
@@ -107,6 +112,7 @@ pub async fn run(config_path: &Path) -> Result<()> {
         search_indices,
         models,
         index_to_model,
+        descriptions,
         server.sparql.clone(),
     );
     let app = app.with_state(state);

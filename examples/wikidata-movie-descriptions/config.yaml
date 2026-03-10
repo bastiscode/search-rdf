@@ -35,10 +35,12 @@ embeddings:
 
 indices:
   - name: wikidata-movies-full-text
+    description: Full-text search over Wikidata movie descriptions
     type: full-text
     data: data/
     output: index/full-text/
   - name: wikidata-movies-embedding
+    description: Semantic search over Wikidata movie descriptions
     type: embedding-with-data
     data: data/
     embedding_data: data/embeddings.safetensors

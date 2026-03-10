@@ -14,6 +14,8 @@ pub async fn health() -> &'static str {
 #[derive(Serialize)]
 pub struct IndexInfo {
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
     #[serde(rename = "type")]
     index_type: String,
     #[serde(rename = "supported-query-types")]
@@ -27,6 +29,7 @@ pub async fn list_indices(State(state): State<AppState>) -> Json<Vec<IndexInfo>>
         .iter()
         .map(|(name, index)| IndexInfo {
             name: name.clone(),
+            description: state.inner.descriptions.get(name).cloned(),
             index_type: index.index_type().to_string(),
             query_types: match index {
                 SearchIndex::Keyword(..) => vec!["text"],
