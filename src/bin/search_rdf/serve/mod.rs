@@ -52,14 +52,14 @@ pub async fn run(config_path: &Path) -> Result<()> {
             .find(|&index| &index.name == name)
             .ok_or_else(|| anyhow!("Index configuration not found for {}", name))?;
 
-        if let Some(model) = index_config.index_type.get_model()
-            && !models.contains_key(model)
-        {
-            info!("Index requires model: {}", model);
-
+        if let Some(model) = index_config.index_type.get_model() {
             index_to_model.insert(name.to_string(), model.to_string());
-            let (emb_model, emb_params) = load_model_and_params(model, &config)?;
-            models.insert(model.to_string(), (emb_model, emb_params));
+
+            if !models.contains_key(model) {
+                info!("Index requires model: {}", model);
+                let (emb_model, emb_params) = load_model_and_params(model, &config)?;
+                models.insert(model.to_string(), (emb_model, emb_params));
+            }
         }
 
         if let Some(desc) = &index_config.description {
