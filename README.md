@@ -7,13 +7,39 @@ search indices, primarily intended to be used with RDF query engines.
 
 ### Installation
 
-Build from source using Cargo:
+#### Python
+
+Install the Python package using [maturin](https://github.com/PyO3/maturin) (requires a Rust toolchain and Python >= 3.12):
+
+```bash
+pip install maturin
+maturin develop --release
+```
+
+This builds the Rust extension and installs the `search_rdf` package into your current environment.
+
+#### Rust (CLI)
+
+Build and install using Cargo:
+
+```bash
+cargo install --path .
+```
+
+Alternatively, build without installing:
 
 ```bash
 cargo build --release
 ```
 
 The binary will be available at `target/release/search-rdf`.
+
+> Note that some CLI features (e.g. embedding generation) require the
+> `search_rdf` Python package to be installed. You might need to set
+> `LD_LIBRARY_PATH` if you encounter issues with the `search-rdf` binary
+> not finding the shared library from the Python package. E.g., if you
+> are in a conda env, you can run:
+> `export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"`
 
 ### CLI Overview
 
