@@ -15,38 +15,35 @@ use crate::search_rdf::config::{Config, ModelType};
 
 pub fn load_model(model_type: &ModelType) -> Result<EmbeddingModel> {
     match model_type {
-        ModelType::Vllm {
-            endpoint,
-            model_name,
-        } => {
-            let vllm = VLLM::new(endpoint, model_name)?;
+        ModelType::Vllm { endpoint, name } => {
+            let vllm = VLLM::new(endpoint, name)?;
             Ok(EmbeddingModel::Vllm(vllm))
         }
 
         ModelType::SentenceTransformer {
-            model_name,
+            name,
             device,
             batch_size,
         } => {
-            let st = SentenceTransformer::load(model_name, device, *batch_size)?;
+            let st = SentenceTransformer::load(name, device, *batch_size)?;
             Ok(EmbeddingModel::SentenceTransformer(st))
         }
 
         ModelType::HuggingFaceImage {
-            model_name,
+            name,
             device,
             batch_size,
         } => {
-            let img_model = HuggingFaceImageModel::load(model_name, device, *batch_size)?;
+            let img_model = HuggingFaceImageModel::load(name, device, *batch_size)?;
             Ok(EmbeddingModel::HuggingFaceImage(img_model))
         }
 
         ModelType::OpenClip {
-            model,
+            name,
             device,
             batch_size,
         } => {
-            let clip_model = OpenClipModel::load(model, device, *batch_size)?;
+            let clip_model = OpenClipModel::load(name, device, *batch_size)?;
             Ok(EmbeddingModel::OpenClip(clip_model))
         }
     }

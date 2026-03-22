@@ -65,10 +65,12 @@ pub struct ModelConfig {
 pub enum ModelType {
     Vllm {
         endpoint: String,
-        model_name: String,
+        #[serde(rename = "model_name")]
+        name: String,
     },
     SentenceTransformer {
-        model_name: String,
+        #[serde(rename = "model_name")]
+        name: String,
         #[serde(default = "default_device")]
         device: String,
         #[serde(default = "default_model_batch_size")]
@@ -76,14 +78,16 @@ pub enum ModelType {
     },
     #[serde(alias = "huggingface-image")]
     HuggingFaceImage {
-        model_name: String,
+        #[serde(rename = "model_name")]
+        name: String,
         #[serde(default = "default_device")]
         device: String,
         #[serde(default = "default_model_batch_size")]
         batch_size: usize,
     },
     OpenClip {
-        model: String,
+        #[serde(rename = "model_name")]
+        name: String,
         #[serde(default = "default_device")]
         device: String,
         #[serde(default = "default_model_batch_size")]
@@ -228,7 +232,7 @@ server:
 models:
   - name: clip
     type: open-clip
-    model: "hf-hub:laion/CLIP-ViT-B-32-laion2B-s34B-b79K"
+    model_name: "hf-hub:laion/CLIP-ViT-B-32-laion2B-s34B-b79K"
     device: cuda
     batch_size: 32
 "#;
@@ -238,7 +242,7 @@ models:
         assert_eq!(models[0].name, "clip");
         match &models[0].model_type {
             ModelType::OpenClip {
-                model,
+                name: model,
                 device,
                 batch_size,
             } => {
@@ -256,7 +260,7 @@ models:
 models:
   - name: clip
     type: open-clip
-    model: "hf-hub:laion/CLIP-ViT-B-32-laion2B-s34B-b79K"
+    model_name: "hf-hub:laion/CLIP-ViT-B-32-laion2B-s34B-b79K"
 "#;
         let config: Config = serde_yaml::from_str(yaml).expect("Failed to parse config");
         let models = config.models.unwrap();
