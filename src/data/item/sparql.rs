@@ -26,6 +26,7 @@ pub enum SPARQLResultFormat {
     Json,
     Xml,
     Tsv,
+    Csv,
 }
 
 impl SPARQLResultFormat {
@@ -34,6 +35,7 @@ impl SPARQLResultFormat {
             SPARQLResultFormat::Json => "application/sparql-results+json",
             SPARQLResultFormat::Xml => "application/sparql-results+xml",
             SPARQLResultFormat::Tsv => "text/tab-separated-values",
+            SPARQLResultFormat::Csv => "text/csv",
         }
     }
 }
@@ -44,6 +46,7 @@ impl From<SPARQLResultFormat> for QueryResultsFormat {
             SPARQLResultFormat::Json => QueryResultsFormat::Json,
             SPARQLResultFormat::Xml => QueryResultsFormat::Xml,
             SPARQLResultFormat::Tsv => QueryResultsFormat::Tsv,
+            SPARQLResultFormat::Csv => QueryResultsFormat::Csv,
         }
     }
 }
@@ -208,11 +211,15 @@ where
     }
 }
 
-pub fn stream_items_from_sparql_result<R: Read>(
+pub fn stream_items_from_sparql_result<R: Read + 'static>(
     reader: R,
     format: SPARQLResultFormat,
     default_field_type: FieldType,
-) -> Result<impl Iterator<Item = Result<Item>>> {
+) -> Result<Box<dyn Iterator<Item = Result<Item>>>> {
+    if format == SPARQLResultFormat::Csv {
+        return stream_items_from_csv(reader, default_field_type);
+    }
+
     let json_parser = QueryResultsParser::from_format(format.into());
 
     let parser = json_parser
@@ -248,12 +255,161 @@ pub fn stream_items_from_sparql_result<R: Read>(
         .iter()
         .position(|v| v.as_str() == "tags" || v.as_str() == "tag");
 
-    Ok(SPARQLResultIterator::new(
+    Ok(Box::new(SPARQLResultIterator::new(
         solutions,
         field_type_column,
         default_field_type,
         field_tag_column,
+    )))
+}
+
+fn stream_items_from_csv<R: Read + 'static>(
+    reader: R,
+    default_field_type: FieldType,
+) -> Result<Box<dyn Iterator<Item = Result<Item>>>> {
+    let mut csv_reader = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .flexible(true)
+        .from_reader(reader);
+
+    let headers: Vec<String> = csv_reader
+        .headers()
+        .map_err(|e| anyhow!("Failed to read CSV headers: {}", e))?
+        .iter()
+        .map(|h| h.to_string())
+        .collect();
+
+    if !(2..=4).contains(&headers.len()) {
+        return Err(anyhow!(
+            "Expected 2 to 4 columns in CSV, found {}: {:?}",
+            headers.len(),
+            headers
+        ));
+    }
+    if headers[0] != "id" {
+        return Err(anyhow!(
+            "Expected first column to be 'id', found '{}'",
+            headers[0]
+        ));
+    }
+    if headers[1] != "value" {
+        return Err(anyhow!(
+            "Expected second column to be 'value', found '{}'",
+            headers[1]
+        ));
+    }
+
+    let field_type_column = headers.iter().position(|h| h == "type");
+    let field_tag_column = headers.iter().position(|h| h == "tags" || h == "tag");
+
+    Ok(Box::new(CsvResultIterator {
+        inner: csv_reader.into_records(),
+        identifier: None,
+        fields: Vec::new(),
+        field_type_column,
+        default_field_type,
+        field_tag_column,
+    }))
+}
+
+struct CsvResultIterator<R: Read> {
+    inner: csv::StringRecordsIntoIter<R>,
+    identifier: Option<String>,
+    fields: Vec<StringField>,
+    field_type_column: Option<usize>,
+    default_field_type: FieldType,
+    field_tag_column: Option<usize>,
+}
+
+fn parse_csv_record(
+    record: &csv::StringRecord,
+    field_type_column: Option<usize>,
+    default_field_type: FieldType,
+    field_tag_column: Option<usize>,
+) -> Result<(String, StringField)> {
+    let id = record
+        .get(0)
+        .ok_or_else(|| anyhow!("Missing 'id' column"))?
+        .to_string();
+
+    let value = record
+        .get(1)
+        .ok_or_else(|| anyhow!("Missing 'value' column"))?
+        .to_string();
+
+    let field_type = if let Some(col) = field_type_column {
+        match record.get(col) {
+            Some(t) if !t.is_empty() => serde_plain::from_str(t)?,
+            _ => default_field_type,
+        }
+    } else {
+        default_field_type
+    };
+
+    let tags = if let Some(col) = field_tag_column {
+        match record.get(col) {
+            Some(t) if !t.is_empty() => t
+                .split(',')
+                .map(|s| serde_plain::from_str(s.trim()))
+                .collect::<Result<_, _>>()?,
+            _ => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
+
+    Ok((
+        id,
+        StringField {
+            value,
+            field_type,
+            tags,
+        },
     ))
+}
+
+impl<R: Read> Iterator for CsvResultIterator<R> {
+    type Item = Result<Item>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        for result in self.inner.by_ref() {
+            let record = match result {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("Unexpected error from CSV result iterator: {}", e);
+                    continue;
+                }
+            };
+
+            let (identifier, field) = match parse_csv_record(
+                &record,
+                self.field_type_column,
+                self.default_field_type,
+                self.field_tag_column,
+            ) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    warn!("Failed to parse CSV row: {}", e);
+                    continue;
+                }
+            };
+
+            if self.identifier.as_ref().is_none_or(|id| id == &identifier) {
+                self.fields.push(field);
+                self.identifier.get_or_insert(identifier);
+                continue;
+            }
+
+            let prev_identifier = self.identifier.replace(identifier)?;
+            let fields = take(&mut self.fields);
+            self.fields.push(field);
+            return Some(Item::from_string_fields(prev_identifier, fields));
+        }
+
+        let identifier = self.identifier.take()?;
+        let fields = take(&mut self.fields);
+        Some(Item::from_string_fields(identifier, fields))
+    }
 }
 
 pub fn stream_items_from_sparql_result_file(
@@ -279,6 +435,7 @@ pub fn guess_sparql_result_format_from_extension(
         "json" => SPARQLResultFormat::Json,
         "xml" => SPARQLResultFormat::Xml,
         "tsv" => SPARQLResultFormat::Tsv,
+        "csv" => SPARQLResultFormat::Csv,
         _ => {
             return Err(anyhow!(
                 "Could not guess SPARQL result format from file extension: {}",
@@ -553,5 +710,87 @@ mod tests {
         assert_eq!(items[1].identifier, "http://example.org/Q2");
         assert_eq!(items[1].num_fields(), 1);
         assert_eq!(items[1].fields[0], Field::text("Earth"));
+    }
+
+    #[test]
+    fn test_stream_csv_single_identifier_multiple_fields() {
+        let csv_data = "id,value\n\
+            http://example.org/Q1,Universe\n\
+            http://example.org/Q1,Cosmos";
+
+        let cursor = Cursor::new(csv_data);
+        let items: Vec<_> =
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::Csv, FieldType::Text)
+                .expect("Failed to create iterator")
+                .collect::<Result<Vec<_>>>()
+                .expect("Failed to parse CSV");
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].identifier, "http://example.org/Q1");
+        assert_eq!(items[0].num_fields(), 2);
+        assert_eq!(items[0].fields[0], Field::text("Universe"));
+        assert_eq!(items[0].fields[1], Field::text("Cosmos"));
+    }
+
+    #[test]
+    fn test_stream_csv_multiple_identifiers() {
+        let csv_data = "id,value\n\
+            http://example.org/Q1,First\n\
+            http://example.org/Q2,Second\n\
+            http://example.org/Q2,Another\n\
+            http://example.org/Q3,Third";
+
+        let cursor = Cursor::new(csv_data);
+        let items: Vec<_> =
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::Csv, FieldType::Text)
+                .expect("Failed to create iterator")
+                .collect::<Result<Vec<_>>>()
+                .expect("Failed to parse CSV");
+
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].identifier, "http://example.org/Q1");
+        assert_eq!(items[0].num_fields(), 1);
+        assert_eq!(items[0].fields[0], Field::text("First"));
+        assert_eq!(items[1].identifier, "http://example.org/Q2");
+        assert_eq!(items[1].num_fields(), 2);
+        assert_eq!(items[1].fields[0], Field::text("Second"));
+        assert_eq!(items[1].fields[1], Field::text("Another"));
+        assert_eq!(items[2].identifier, "http://example.org/Q3");
+        assert_eq!(items[2].num_fields(), 1);
+        assert_eq!(items[2].fields[0], Field::text("Third"));
+    }
+
+    #[test]
+    fn test_stream_csv_empty() {
+        let csv_data = "id,value\n";
+
+        let cursor = Cursor::new(csv_data);
+        let items: Vec<_> =
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::Csv, FieldType::Text)
+                .expect("Failed to create iterator")
+                .collect::<Result<Vec<_>>>()
+                .expect("Failed to parse CSV");
+
+        assert_eq!(items.len(), 0);
+    }
+
+    #[test]
+    fn test_stream_csv_with_type_column() {
+        let csv_data = "id,value,type\n\
+            http://example.org/Q1,Universe,text\n\
+            http://example.org/Q1,Cosmos,text";
+
+        let cursor = Cursor::new(csv_data);
+        let items: Vec<_> =
+            stream_items_from_sparql_result(cursor, SPARQLResultFormat::Csv, FieldType::Text)
+                .expect("Failed to create iterator")
+                .collect::<Result<Vec<_>>>()
+                .expect("Failed to parse CSV");
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].identifier, "http://example.org/Q1");
+        assert_eq!(items[0].num_fields(), 2);
+        assert_eq!(items[0].fields[0], Field::text("Universe"));
+        assert_eq!(items[0].fields[1], Field::text("Cosmos"));
     }
 }
