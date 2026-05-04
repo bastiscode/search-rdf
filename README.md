@@ -160,7 +160,7 @@ models:
   # OpenCLIP multimodal models (text + image in shared space)
   - name: my-clip-model
     type: open-clip
-    model: hf-hub:timm/ViT-B-16-SigLIP2
+    model_name: hf-hub:timm/ViT-B-16-SigLIP2
     device: cuda
     batch_size: 32
 ```

@@ -37,7 +37,7 @@ curl -X POST http://localhost:8080/search/nature \
 # Image search via URL (uses CLIP vision encoder)
 curl -X POST http://localhost:8080/search/nature \
   -H "Content-Type: application/json" \
-  -d '{"queries": [{"type": "value", "value": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0a/Standing_jaguar.jpg/373px-Standing_jaguar.jpg", "modality": "image"}], "k": 10}'
+  -d '{"queries": [{"type": "value", "value": "https://commons.wikimedia.org/wiki/Special:Redirect/file/Standing_jaguar.jpg?width=373", "modality": "image"}], "k": 10}'
 
 # Image search via base64
 curl -X POST http://localhost:8080/search/nature \
@@ -49,7 +49,7 @@ curl -X POST http://localhost:8080/search/nature \
 # - Plain text is embedded with the text encoder
 curl -X POST http://localhost:8080/search/nature \
   -H "Content-Type: application/json" \
-  -d '{"queries": [{"type": "value", "value": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0a/Standing_jaguar.jpg/373px-Standing_jaguar.jpg"}], "k": 10}'
+  -d '{"queries": [{"type": "value", "value": "https://commons.wikimedia.org/wiki/Special:Redirect/file/Standing_jaguar.jpg?width=373"}], "k": 10}'
 ```
 
 ## Notes
